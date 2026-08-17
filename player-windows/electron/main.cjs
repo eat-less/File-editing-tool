@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, protocol, net } = require('electron')
+const os = require('os')
 const path = require('path')
 const fs = require('fs')
 const { pathToFileURL } = require('url')
@@ -90,8 +91,20 @@ function registerMediaProtocol() {
   })
 }
 
+function getLocalIp() {
+  const ifaces = os.networkInterfaces()
+  for (const name of Object.keys(ifaces)) {
+    for (const info of ifaces[name] || []) {
+      if (info.family === 'IPv4' && !info.internal) return info.address
+    }
+  }
+  return ''
+}
+
 function registerIpc() {
   ipcMain.handle('config:get', () => readConfig())
+
+  ipcMain.handle('ip:get', () => getLocalIp())
 
   ipcMain.handle('cache:exists', (_e, hash) => !!lookupMediaPath(hash))
 

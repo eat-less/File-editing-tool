@@ -160,6 +160,11 @@ async def update_device(db: AsyncSession, device_id: uuid.UUID, data: dict) -> D
     device = result.scalar_one_or_none()
     if not device:
         raise HTTPException(status_code=404, detail="设备不存在")
+    new_code = data.get("unique_code")
+    if new_code and new_code != device.unique_code:
+        existing = await db.execute(select(Device).where(Device.unique_code == new_code))
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="设备唯一编号已存在")
     for key, value in data.items():
         if value is not None:
             setattr(device, key, value)

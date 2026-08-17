@@ -64,6 +64,7 @@ class DeviceCreate(BaseModel):
 class DeviceUpdate(BaseModel):
     name: Optional[str] = None
     device_type: Optional[str] = None
+    unique_code: Optional[str] = None
     ip_address: Optional[str] = None
     config_file_path: Optional[str] = None
     design_width: Optional[int] = None

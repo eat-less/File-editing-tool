@@ -87,13 +87,26 @@ function onState(state) {
 async function handleSync() {
   clearOfflineRetry()
   if (!serverUrl.value) return
-  stage.value = 'downloading'
   try {
     const sync = await fetchSync(serverUrl.value, deviceCode.value)
     if (!sync.published) {
       stage.value = 'waiting'
       return
     }
+    const cached = await window.playerAPI.stateRead().catch(() => null)
+    const sameVersion = !!(cached && cached.programId === sync.program_id && cached.version === sync.version)
+
+    if (sameVersion && configRef) {
+      socket?.reportSyncDone(sync.program_id, sync.version)
+      ensureAssets(serverUrl.value, sync.assets || []).catch(() => {})
+      offlineBadge.value = false
+      return
+    }
+
+    if (sameVersion && cached && cached.config) {
+      setConfig(cached.config)
+    }
+    stage.value = 'downloading'
     socket?.reportSyncStatus(sync.program_id, 0)
     const result = await ensureAssets(serverUrl.value, sync.assets || [], (p) => {
       progress.value = p.percent
@@ -162,21 +175,30 @@ function handleKeydown(e) {
 
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
+  let localIp = ''
   try {
     const cfg = await loadConfig()
     serverUrl.value = (cfg.serverUrl || 'http://127.0.0.1:8000').replace(/\/+$/, '')
     deviceCode.value = cfg.deviceCode || 'DEV-001'
+    if (window.playerAPI && window.playerAPI.getLocalIp) {
+      localIp = await window.playerAPI.getLocalIp()
+    }
   } catch {}
+  const cached = await window.playerAPI.stateRead().catch(() => null)
+  if (cached && cached.config) {
+    setConfig(cached.config)
+  }
   bootTimer = setTimeout(async () => {
     socket = createDeviceSocket({
       serverUrl: serverUrl.value,
       deviceCode: deviceCode.value,
+      ipAddress: localIp,
       onUpdate: handleSync,
       onCommand: handleCommand,
       onConnectionChange,
     })
     await handleSync()
-  }, 2500)
+  }, 1500)
 })
 
 onUnmounted(() => {

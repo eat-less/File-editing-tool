@@ -61,7 +61,9 @@ async def device_websocket(websocket: WebSocket, device_code: str):
                 msg = json.loads(data)
                 mtype = msg.get("type")
                 if mtype == "device:register":
-                    ip = msg.get("ip_address")
+                    ip = websocket.client.host if websocket.client else None
+                    if not ip:
+                        ip = msg.get("ip_address")
                     async with async_session_factory() as db:
                         await _sync_device(db, device_code, True, ip)
                         await write_log(

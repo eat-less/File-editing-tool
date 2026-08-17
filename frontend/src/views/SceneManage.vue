@@ -54,7 +54,7 @@
     </el-dialog>
 
     <!-- Device dialogs -->
-    <el-dialog v-model="showDeviceDialog" title="添加设备" width="500px">
+    <el-dialog v-model="showDeviceDialog" :title="editingDeviceId ? '编辑设备' : '添加设备'" width="500px">
       <el-form :model="deviceForm">
         <el-form-item label="名称"><el-input v-model="deviceForm.name" /></el-form-item>
         <el-form-item label="类型">
@@ -62,6 +62,9 @@
             <el-option label="PC" value="pc" /><el-option label="触摸屏" value="touch_screen" />
             <el-option label="安卓盒子" value="android_box" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="唯一编号">
+          <el-input v-model="deviceForm.unique_code" placeholder="留空则自动生成" />
         </el-form-item>
         <el-form-item label="IP地址"><el-input v-model="deviceForm.ip_address" /></el-form-item>
         <el-form-item label="分辨率">
@@ -72,7 +75,7 @@
       </el-form>
       <template #footer>
         <el-button @click="showDeviceDialog = false">取消</el-button>
-        <el-button type="primary" @click="createDevice">确定</el-button>
+        <el-button type="primary" @click="saveDevice">确定</el-button>
       </template>
     </el-dialog>
   </div>
@@ -94,7 +97,8 @@ const currentSceneId = ref('')
 const devicesMap = ref<Record<string, any[]>>({})
 
 const sceneForm = reactive({ name: '', description: '' })
-const deviceForm = reactive({ name: '', device_type: 'pc', ip_address: '', design_width: 1920, design_height: 1080 })
+const deviceForm = reactive({ name: '', device_type: 'pc', unique_code: '', ip_address: '', design_width: 1920, design_height: 1080 })
+const editingDeviceId = ref('')
 
 onMounted(async () => {
   await projectStore.fetchScenes(exhibitId)
@@ -126,27 +130,37 @@ async function deleteScene(row: any) {
 
 function openDeviceDialog(sceneId: string) {
   currentSceneId.value = sceneId
+  editingDeviceId.value = ''
+  deviceForm.name = ''; deviceForm.device_type = 'pc'; deviceForm.unique_code = ''
+  deviceForm.ip_address = ''; deviceForm.design_width = 1920; deviceForm.design_height = 1080
   showDeviceDialog.value = true
 }
 
-async function createDevice() {
-  await projectStore.createDeviceItem(currentSceneId.value, {
+async function saveDevice() {
+  const payload = {
     name: deviceForm.name, device_type: deviceForm.device_type,
+    unique_code: deviceForm.unique_code || undefined,
     ip_address: deviceForm.ip_address, design_width: deviceForm.design_width,
     design_height: deviceForm.design_height
-  })
+  }
+  if (editingDeviceId.value) {
+    await projectStore.updateDeviceItem(editingDeviceId.value, payload)
+  } else {
+    await projectStore.createDeviceItem(currentSceneId.value, payload)
+  }
   showDeviceDialog.value = false
-  deviceForm.name = ''; deviceForm.ip_address = ''
   const res = await import('@/api/exhibit').then(m => m.getDevices(currentSceneId.value))
   devicesMap.value[currentSceneId.value] = res.data || []
-  ElMessage.success('添加成功')
+  ElMessage.success(editingDeviceId.value ? '更新成功' : '添加成功')
 }
 
 async function editDevice(row: any) {
   deviceForm.name = row.name; deviceForm.device_type = row.device_type
+  deviceForm.unique_code = row.unique_code || ''
   deviceForm.ip_address = row.ip_address || ''; deviceForm.design_width = row.design_width
   deviceForm.design_height = row.design_height
   currentSceneId.value = row.scene_id
+  editingDeviceId.value = row.id
   showDeviceDialog.value = true
 }
 
