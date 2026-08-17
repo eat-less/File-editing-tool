@@ -1,0 +1,16 @@
+import request from './request'
+
+export const createProgram = (data: any) => request.post('/programs', data)
+export const getPrograms = (params?: any) => request.get('/programs', { params })
+export const getProgram = (id: string) => request.get(`/programs/${id}`)
+export const copyProgram = (id: string, data: any) => request.post(`/programs/${id}/copy`, data)
+export const deleteProgram = (id: string) => request.delete(`/programs/${id}`)
+export const getProgramStatus = (id: string) => request.get(`/programs/${id}/status`)
+export const saveConfig = (id: string, config: any) => request.put(`/programs/${id}/config`, { config })
+export const publishProgram = (id: string, change_note: string) => request.post(`/programs/${id}/publish`, { change_note })
+export const publishAllScene = (sceneId: string, change_note: string) => request.post(`/scenes/${sceneId}/publish-all`, { change_note })
+export const getVersions = (id: string) => request.get(`/programs/${id}/versions`)
+export const getVersionDetail = (id: string, version: number) => request.get(`/programs/${id}/versions/${version}`)
+export const rollback = (id: string, version: number, rollback_reason: string) => request.post(`/programs/${id}/rollback`, { version, rollback_reason })
+export const getDistribution = (id: string) => request.get(`/programs/${id}/distribution`)
+export const getDistributionLogs = (params?: any) => request.get('/distribution/logs', { params })

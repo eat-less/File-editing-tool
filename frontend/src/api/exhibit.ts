@@ -1,0 +1,15 @@
+import request from './request'
+
+export const getExhibits = () => request.get('/exhibits')
+export const createExhibit = (data: any) => request.post('/exhibits', data)
+export const updateExhibit = (id: string, data: any) => request.put(`/exhibits/${id}`, data)
+export const deleteExhibit = (id: string) => request.delete(`/exhibits/${id}`)
+export const getScenes = (exhibitId: string) => request.get(`/exhibits/${exhibitId}/scenes`)
+export const createScene = (exhibitId: string, data: any) => request.post(`/exhibits/${exhibitId}/scenes`, data)
+export const updateScene = (id: string, data: any) => request.put(`/scenes/${id}`, data)
+export const deleteScene = (id: string) => request.delete(`/scenes/${id}`)
+export const getDevices = (sceneId: string) => request.get(`/scenes/${sceneId}/devices`)
+export const createDevice = (sceneId: string, data: any) => request.post(`/scenes/${sceneId}/devices`, data)
+export const updateDevice = (id: string, data: any) => request.put(`/devices/${id}`, data)
+export const deleteDevice = (id: string) => request.delete(`/devices/${id}`)
+export const getDeviceStatus = (id: string) => request.get(`/devices/${id}/status`)
