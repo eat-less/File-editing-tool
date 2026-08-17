@@ -165,7 +165,7 @@ function registerIpc() {
 function createWindow() {
   ensureDirs()
   const display = screen.getPrimaryDisplay()
-  const { width, height, x, y } = display.bounds
+  const { x, y, width, height } = display.workArea
   mainWindow = new BrowserWindow({
     width,
     height,
@@ -179,6 +179,12 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  })
+
+  mainWindow.once('ready-to-show', () => {
+    if (mainWindow && !mainWindow.isFullScreen()) {
+      mainWindow.setFullScreen(true)
+    }
   })
 
   const devUrl = process.env.VITE_DEV_SERVER_URL

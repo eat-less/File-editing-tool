@@ -144,7 +144,10 @@ const pageStyle = computed(() => {
   const dh = device.value.designHeight || 1080
   const cw = containerSize.width || 800
   const ch = containerSize.height || 600
-  const scale = Math.min(cw / dw, ch / dh, props.fill ? Infinity : 1)
+  const fitScale = Math.min(cw / dw, ch / dh)
+  const scale = props.fill
+    ? Math.min(fitScale, (window.screen?.width || cw) / dw, (window.screen?.height || ch) / dh)
+    : Math.min(fitScale, 1)
   return {
     width: `${dw}px`,
     height: `${dh}px`,
