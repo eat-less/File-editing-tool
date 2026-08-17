@@ -1012,7 +1012,12 @@ function applyPageTransition(targetIdx: number, direction: number) {
 }
 
 function onPageEnter() {
+  videoRefs.clear()
+  videoRegistered.clear()
   startAutoPlay()
+  startImageCycling()
+  startVideoCycling()
+  startSequenceAnimations()
   applyMoveAnimations()
   applyTextAppearEffects()
   reportState()
@@ -1022,8 +1027,10 @@ function setPlaying(v: boolean) {
   playing.value = v
   if (v) {
     startAutoPlay()
-    playAllVideos()
+    startImageCycling()
+    startVideoCycling()
     startSequenceAnimations()
+    playAllVideos()
   } else {
     stopAutoPlay()
     pauseAllVideos()
@@ -1079,6 +1086,7 @@ function stopAll() {
   stopMoveAnimations()
   typeTimers.forEach(t => clearInterval(t))
   typeTimers.clear()
+  videoRefs.clear()
   videoRegistered.clear()
 }
 
