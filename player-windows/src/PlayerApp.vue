@@ -5,9 +5,16 @@
       ref="stageRef"
       :config="config"
       :asset-url="assetUrl"
+      :fill="true"
       :on-cross-device="onCrossDevice"
       :on-state="onState"
     />
+
+    <div v-if="stage === 'playing' && config" class="player-nav" :class="{ dim: navHidden }" @mouseenter="pokeNav">
+      <button class="nav-btn nav-prev" @click.stop="goPrev" :disabled="pageCount <= 1">&lt;</button>
+      <span v-if="navShowIndicator" class="nav-indicator">{{ currentIndex + 1 }} / {{ pageCount }}</span>
+      <button class="nav-btn nav-next" @click.stop="goNext" :disabled="pageCount <= 1">&gt;</button>
+    </div>
 
     <div v-if="stage === 'booting'" class="overlay">
       <div class="logo-box">
@@ -64,11 +71,18 @@ const serverUrl = ref('')
 const year = new Date().getFullYear()
 const onlineBadge = ref(false)
 const offlineBadge = ref(false)
+const currentIndex = ref(0)
+const pageCount = ref(1)
+const navHidden = ref(false)
+const navShowIndicator = ref(true)
 
 let socket = null
 let bootTimer = null
 let offlineRetryTimer = null
+let navTimer = null
 let configRef = null
+let touchStartX = 0
+let touchStartY = 0
 
 function assetUrl(hash) {
   return `media://assets/${hash}`
@@ -81,7 +95,36 @@ function onCrossDevice(hotspot) {
 }
 
 function onState(state) {
+  currentIndex.value = state.pageIndex
+  pageCount.value = state.pageCount
   if (socket) socket.reportStatus(state.pageIndex, '')
+  pokeNav()
+}
+
+function pokeNav() {
+  navHidden.value = false
+  navShowIndicator.value = true
+  if (navTimer) clearTimeout(navTimer)
+  navTimer = setTimeout(() => {
+    navHidden.value = true
+    navShowIndicator.value = false
+  }, 3000)
+}
+
+function goNext() {
+  if (stage.value !== 'playing' || !stageRef.value) return
+  stageRef.value.next()
+  pokeNav()
+}
+
+function goPrev() {
+  if (stage.value !== 'playing' || !stageRef.value) return
+  stageRef.value.prev()
+  pokeNav()
+}
+
+function clearNavTimer() {
+  if (navTimer) { clearTimeout(navTimer); navTimer = null }
 }
 
 async function handleSync() {
@@ -171,10 +214,36 @@ function handleKeydown(e) {
   if (e.key === 'Escape' && window.playerAPI && window.playerAPI.toggleFullscreen) {
     window.playerAPI.toggleFullscreen()
   }
+  if (e.key === 'ArrowRight') goNext()
+  if (e.key === 'ArrowLeft') goPrev()
+}
+
+function handleWheel(e) {
+  if (e.deltaY > 0) goNext()
+  else if (e.deltaY < 0) goPrev()
+}
+
+function handleTouchStart(e) {
+  const t = e.changedTouches[0]
+  touchStartX = t.clientX
+  touchStartY = t.clientY
+}
+
+function handleTouchEnd(e) {
+  const t = e.changedTouches[0]
+  const dx = t.clientX - touchStartX
+  const dy = t.clientY - touchStartY
+  if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+    if (dx < 0) goNext()
+    else goPrev()
+  }
 }
 
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('wheel', handleWheel, { passive: true })
+  window.addEventListener('touchstart', handleTouchStart, { passive: true })
+  window.addEventListener('touchend', handleTouchEnd, { passive: true })
   let localIp = ''
   try {
     const cfg = await loadConfig()
@@ -203,6 +272,10 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('wheel', handleWheel)
+  window.removeEventListener('touchstart', handleTouchStart)
+  window.removeEventListener('touchend', handleTouchEnd)
+  clearNavTimer()
   if (bootTimer) clearTimeout(bootTimer)
   clearOfflineRetry()
   if (socket) socket.stop()
@@ -249,4 +322,33 @@ onUnmounted(() => {
 }
 .badge.online { color: #67c23a; }
 .badge.offline { color: #e6a23c; }
+.player-nav {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  z-index: 30;
+  transition: opacity 0.3s;
+}
+.player-nav.dim { opacity: 0.2; }
+.player-nav .nav-btn {
+  width: 48px;
+  height: 48px;
+  border: 1px solid rgba(255,255,255,0.3);
+  background: rgba(0,0,0,0.45);
+  color: #fff;
+  border-radius: 50%;
+  font-size: 22px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.player-nav .nav-btn:hover:not(:disabled) { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.55); }
+.player-nav .nav-btn:disabled { opacity: 0.25; cursor: default; }
+.player-nav .nav-indicator { color: rgba(255,255,255,0.75); font-size: 15px; min-width: 70px; text-align: center; }
 </style>

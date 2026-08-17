@@ -40,7 +40,9 @@
                  :src="assetUrl(videoCurrentSrc[layer.element.id])"
                  style="width:100%;height:100%;object-fit:cover"
                  :loop="layer.element.loop" autoplay :muted="layer.element.muted"
-                 :volume="layer.element.volume ?? 0.8" />
+                 :controls="videoControls"
+                 :volume="layer.element.volume ?? 0.8"
+                 @dblclick.stop="toggleVideoPlay(layer.element.id)" />
           <div v-else-if="hasMultipleVideos(layer.element)" class="player-video-placeholder">▶ 视频</div>
           <div v-else class="player-video-placeholder">▶ 视频</div>
           <div v-if="showMediaControls(layer.element)" class="player-media-controls">
@@ -116,6 +118,8 @@ const props = defineProps<{
   onState?: (state: { pageIndex: number; pageCount: number; playing: boolean }) => void
   startIndex?: number
   autoPlay?: boolean
+  videoControls?: boolean
+  fill?: boolean
 }>()
 
 const stageContainer = ref<HTMLElement>()
@@ -140,7 +144,7 @@ const pageStyle = computed(() => {
   const dh = device.value.designHeight || 1080
   const cw = containerSize.width || 800
   const ch = containerSize.height || 600
-  const scale = Math.min(cw / dw, ch / dh, 1)
+  const scale = Math.min(cw / dw, ch / dh, props.fill ? Infinity : 1)
   return {
     width: `${dw}px`,
     height: `${dh}px`,
@@ -343,6 +347,16 @@ function registerVideo(el: any, elementId: string) {
     videoRefs.set(elementId, el)
     videoRegistered.add(elementId)
     el.play().catch(() => {})
+  }
+}
+
+function toggleVideoPlay(elementId: string) {
+  const video = videoRefs.get(elementId)
+  if (!video) return
+  if (video.paused) {
+    video.play().catch(() => {})
+  } else {
+    video.pause()
   }
 }
 

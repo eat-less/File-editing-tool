@@ -16,6 +16,7 @@
           :start-index="editorStore.currentPageIndex"
           :on-cross-device="onCrossDevice"
           :on-state="onState"
+          :video-controls="true"
         />
         <div class="preview-nav">
           <button class="nav-btn nav-prev" @click.stop="stageRef?.prev()" :disabled="pageCount <= 1">&lt;</button>

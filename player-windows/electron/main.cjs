@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, protocol, net } = require('electron')
+const { app, BrowserWindow, ipcMain, protocol, net, screen } = require('electron')
 const os = require('os')
 const path = require('path')
 const fs = require('fs')
@@ -164,9 +164,13 @@ function registerIpc() {
 
 function createWindow() {
   ensureDirs()
+  const display = screen.getPrimaryDisplay()
+  const { width, height, x, y } = display.bounds
   mainWindow = new BrowserWindow({
-    width: 1920,
-    height: 1080,
+    width,
+    height,
+    x,
+    y,
     fullscreen: true,
     autoHideMenuBar: true,
     backgroundColor: '#000000',
