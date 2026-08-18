@@ -260,6 +260,15 @@ async def create_program(db: AsyncSession, data: dict, creator_id: uuid.UUID | N
     dev_result = await db.execute(select(Device).where(Device.id == program.device_id))
     device = dev_result.scalar_one_or_none()
 
+    program.config = {
+        "pages": [],
+        "device": {
+            "designWidth": (device.design_width if device and device.design_width else 1920),
+            "designHeight": (device.design_height if device and device.design_height else 1080),
+            "name": (device.name if device else "") or "",
+        },
+    }
+
     exhibit_name = exhibit.name if exhibit else "未分类展项"
     scene_name = scene.name if scene else "未分类场景"
     device_name = device.name if device else str(program.device_id)
