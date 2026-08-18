@@ -141,7 +141,10 @@ async function handleSync() {
 
     if (sameVersion && configRef) {
       socket?.reportSyncDone(sync.program_id, sync.version)
-      ensureAssets(serverUrl.value, sync.assets || []).catch(() => {})
+      const result = await ensureAssets(serverUrl.value, sync.assets || []).catch(() => null)
+      if (result && result.downloadedBytes > 0 && configRef) {
+        setConfig(configRef)
+      }
       offlineBadge.value = false
       return
     }

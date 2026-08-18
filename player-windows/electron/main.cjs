@@ -41,7 +41,7 @@ function mimeToExt(mime) {
 let mainWindow = null
 
 function cacheDir() {
-  return path.join(app.getPath('userData'), 'cache')
+  return path.join(app.getPath('userData'), 'media-cache')
 }
 
 function stateFile() {
@@ -165,7 +165,7 @@ function registerIpc() {
 function createWindow() {
   ensureDirs()
   const display = screen.getPrimaryDisplay()
-  const { x, y, width, height } = display.workArea
+  const { x, y, width, height } = display.bounds
   mainWindow = new BrowserWindow({
     width,
     height,
@@ -185,6 +185,11 @@ function createWindow() {
     if (mainWindow && !mainWindow.isFullScreen()) {
       mainWindow.setFullScreen(true)
     }
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isFullScreen()) {
+        mainWindow.setFullScreen(true)
+      }
+    }, 800)
   })
 
   const devUrl = process.env.VITE_DEV_SERVER_URL
