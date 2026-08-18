@@ -58,7 +58,7 @@ import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import PlayerStage from '@/render-engine/PlayerStage.vue'
 import { loadConfig } from './config.js'
 import { createDeviceSocket } from './deviceSocket.js'
-import { fetchSync, ensureAssets } from './playerService.js'
+import { fetchSync, ensureAssets, assetsCached } from './playerService.js'
 import { buildDeviceAction } from '@/utils/hotspotAction'
 
 const stageRef = ref(null)
@@ -168,25 +168,48 @@ async function handleSync() {
       stage.value = 'waiting'
       return
     }
-    const cached = await window.playerAPI.stateRead().catch(() => null)
-    const sameVersion = !!(cached && cached.programId === sync.program_id && cached.version === sync.version)
+    const state = await window.playerAPI.stateRead().catch(() => null)
+    const cachedProgram = state?.programs?.[sync.program_id]
+    const sameVersion = !!(cachedProgram && cachedProgram.version === sync.version)
+    const isActive = state?.activeProgramId === sync.program_id
 
-    if (sameVersion && configRef) {
+    if (sameVersion && isActive && configRef) {
       socket?.reportSyncDone(sync.program_id, sync.version)
-      const result = await ensureAssets(serverUrl.value, sync.assets || []).catch(() => null)
-      if (result && result.downloadedBytes > 0 && configRef) {
-        setConfig(configRef)
-      }
+      ensureAssets(serverUrl.value, sync.assets || []).catch(() => {})
       offlineBadge.value = false
       return
     }
 
-    if (sameVersion && cached && cached.config) {
-      setConfig(cached.config)
+    if (sameVersion && cachedProgram?.config) {
+      setConfig(cachedProgram.config)
+      await window.playerAPI.stateWrite({
+        programId: sync.program_id,
+        programName: sync.program_name,
+        version: sync.version,
+        config: sync.config,
+      })
+      socket?.reportSyncDone(sync.program_id, sync.version)
+      offlineBadge.value = false
+      return
     }
+
+    const allCached = sync.assets?.length ? await assetsCached(sync.assets) : true
+    if (allCached && cachedProgram?.config) {
+      setConfig(cachedProgram.config)
+      await window.playerAPI.stateWrite({
+        programId: sync.program_id,
+        programName: sync.program_name,
+        version: sync.version,
+        config: sync.config,
+      })
+      socket?.reportSyncDone(sync.program_id, sync.version)
+      offlineBadge.value = false
+      return
+    }
+
     stage.value = 'downloading'
     socket?.reportSyncStatus(sync.program_id, 0)
-    const result = await ensureAssets(serverUrl.value, sync.assets || [], (p) => {
+    await ensureAssets(serverUrl.value, sync.assets || [], (p) => {
       progress.value = p.percent
       progressDone.value = p.done
       progressTotal.value = p.total
@@ -209,19 +232,15 @@ async function handleSync() {
 async function tryOffline(err) {
   console.warn('[player] sync failed, try offline:', err)
   try {
-    const cached = await window.playerAPI.stateRead()
-    if (cached && cached.config) {
-      setConfig(cached.config)
+    const state = await window.playerAPI.stateRead()
+    if (state?.activeProgramId && state.programs?.[state.activeProgramId]?.config) {
+      setConfig(state.programs[state.activeProgramId].config)
       offlineBadge.value = true
       stage.value = 'playing'
       return
     }
   } catch {}
-  if (onlineBadge.value) {
-    stage.value = 'offline'
-  } else {
-    stage.value = 'offline'
-  }
+  stage.value = 'offline'
   offlineRetryTimer = setTimeout(handleSync, 5000)
 }
 
@@ -293,8 +312,8 @@ onMounted(async () => {
     }
   } catch {}
   const cached = await window.playerAPI.stateRead().catch(() => null)
-  if (cached && cached.config) {
-    setConfig(cached.config)
+  if (cached?.activeProgramId && cached.programs?.[cached.activeProgramId]?.config) {
+    setConfig(cached.programs[cached.activeProgramId].config)
   }
   bootTimer = setTimeout(async () => {
     socket = createDeviceSocket({

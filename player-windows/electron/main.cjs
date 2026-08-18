@@ -141,15 +141,30 @@ function registerIpc() {
 
   ipcMain.handle('state:read', () => {
     try {
-      return JSON.parse(fs.readFileSync(stateFile(), 'utf-8'))
+      const raw = JSON.parse(fs.readFileSync(stateFile(), 'utf-8'))
+      if (raw.programId && !raw.programs) {
+        return { programs: { [raw.programId]: raw }, activeProgramId: raw.programId }
+      }
+      return raw
     } catch {
-      return null
+      return { programs: {}, activeProgramId: null }
     }
   })
 
   ipcMain.handle('state:write', (_e, payload) => {
     try {
-      fs.writeFileSync(stateFile(), JSON.stringify(payload, null, 2))
+      const { programId } = payload
+      if (!programId) return { ok: false, error: 'missing programId' }
+      let state
+      try {
+        state = JSON.parse(fs.readFileSync(stateFile(), 'utf-8'))
+        if (!state.programs) state = { programs: {}, activeProgramId: null }
+      } catch {
+        state = { programs: {}, activeProgramId: null }
+      }
+      state.programs[programId] = payload
+      state.activeProgramId = programId
+      fs.writeFileSync(stateFile(), JSON.stringify(state, null, 2))
       return { ok: true }
     } catch (err) {
       return { ok: false, error: String(err) }

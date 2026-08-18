@@ -32,14 +32,18 @@ const changeNote = ref('')
 const exporting = ref(false)
 const programInfo = ref<any>(null)
 
-watch(() => props.programId, async (id) => {
-  if (id) {
-    const res = await getProgram(id)
-    programInfo.value = res.data
-  }
-}, { immediate: true })
+async function loadInfo() {
+  if (!props.programId) return
+  const res = await getProgram(props.programId)
+  programInfo.value = res.data
+}
 
-function open() { dialogVisible.value = true }
+watch(() => props.programId, loadInfo, { immediate: true })
+
+function open() {
+  dialogVisible.value = true
+  loadInfo()
+}
 defineExpose({ open })
 
 async function doExport() {
@@ -50,6 +54,7 @@ async function doExport() {
     ElMessage.success('导出成功')
     dialogVisible.value = false
     changeNote.value = ''
+    loadInfo()
     emit('done')
   } catch (e: any) {
     ElMessage.error(e?.message || '导出失败')

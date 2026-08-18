@@ -15,7 +15,7 @@
       <el-divider direction="vertical" />
       <el-button size="small" type="primary" @click="save">保存</el-button>
       <el-button size="small" type="success" @click="showPreview = true">预览</el-button>
-      <el-button size="small" type="warning" @click="showExport = true">导出</el-button>
+      <el-button size="small" type="warning" @click="openExport">导出</el-button>
       <span style="margin-left:auto;color:#909399">{{ editorStore.programInfo?.name || '' }}</span>
     </div>
     <div class="editor-body">
@@ -74,7 +74,6 @@ import ExportDialog from '@/views/editor/ExportDialog.vue'
 const route = useRoute()
 const editorStore = useEditorStore()
 const showPreview = ref(false)
-const showExport = ref(false)
 const exportDialogRef = ref()
 const canvasContainer = ref<HTMLElement>()
 
@@ -128,6 +127,13 @@ function addElement(type: string) { editorStore.addElement(type) }
 function groupLayers() { /* grouped layers logic */ }
 
 async function save() { await editorStore.save(); ElMessage.success('保存成功') }
+
+async function openExport() {
+  if (editorStore.isDirty) {
+    await editorStore.save()
+  }
+  await exportDialogRef.value?.open()
+}
 
 function onZoomSlide(v: number) { editorStore.setZoom(v / 100) }
 function zoomFit() {

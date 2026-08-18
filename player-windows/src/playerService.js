@@ -39,6 +39,14 @@ export async function downloadAssetToCache(serverUrl, asset) {
   return { downloaded: true }
 }
 
+export async function assetsCached(assets) {
+  for (const asset of assets) {
+    const exists = await window.playerAPI.cacheExists(asset.hash_key)
+    if (!exists) return false
+  }
+  return true
+}
+
 export async function ensureAssets(serverUrl, assets, onProgress) {
   const total = assets.length
   let done = 0
