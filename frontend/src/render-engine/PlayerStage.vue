@@ -142,8 +142,8 @@ const imageCaptionLayers = computed(() =>
 const pageStyle = computed(() => {
   const dw = device.value.designWidth || 1920
   const dh = device.value.designHeight || 1080
-  const cw = containerSize.width || 800
-  const ch = containerSize.height || 600
+  const cw = Math.max(containerSize.width, window.innerWidth || 800)
+  const ch = Math.max(containerSize.height, window.innerHeight || 600)
   const fitScale = Math.min(cw / dw, ch / dh)
   const scale = props.fill ? fitScale : Math.min(fitScale, 1)
   return {
@@ -1103,6 +1103,11 @@ function setupResizeObserver() {
     for (const entry of entries) {
       containerSize.width = entry.contentRect.width
       containerSize.height = entry.contentRect.height
+      console.log('[stage] container=' + entry.contentRect.width + 'x' + entry.contentRect.height +
+        ' inner=' + window.innerWidth + 'x' + window.innerHeight +
+        ' screen=' + window.screen.width + 'x' + window.screen.height +
+        ' design=' + (device.value.designWidth || 1920) + 'x' + (device.value.designHeight || 1080) +
+        ' fill=' + props.fill)
     }
   })
   if (stageContainer.value) resizeObserver.observe(stageContainer.value)

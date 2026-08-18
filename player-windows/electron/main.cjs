@@ -166,6 +166,9 @@ function createWindow() {
   ensureDirs()
   const display = screen.getPrimaryDisplay()
   const { x, y, width, height } = display.bounds
+  console.log('[main] displays:', JSON.stringify(screen.getAllDisplays()))
+  console.log('[main] primary display:', JSON.stringify(display))
+
   mainWindow = new BrowserWindow({
     width,
     height,
@@ -180,16 +183,31 @@ function createWindow() {
       nodeIntegration: false,
     },
   })
+  mainWindow.setMenuBarVisibility(false)
+
+  function forceFullscreen(tag) {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    try {
+      if (!mainWindow.isFullScreen()) mainWindow.setFullScreen(true)
+    } catch (err) {
+      console.log('[main] setFullScreen error:', err)
+    }
+    const cur = mainWindow.getBounds()
+    const disp = screen.getDisplayMatching(cur)
+    const b = disp.bounds
+    if (!mainWindow.isFullScreen() && (cur.width !== b.width || cur.height !== b.height)) {
+      try { mainWindow.setBounds(b) } catch (err) { console.log('[main] setBounds error:', err) }
+    }
+    console.log(`[main] ${tag}: isFullScreen=${mainWindow.isFullScreen()} bounds=${JSON.stringify(mainWindow.getBounds())} display=${JSON.stringify(b)}`)
+  }
+
+  mainWindow.on('enter-full-screen', () => console.log('[main] enter-full-screen event'))
+  mainWindow.on('leave-full-screen', () => console.log('[main] leave-full-screen event'))
 
   mainWindow.once('ready-to-show', () => {
-    if (mainWindow && !mainWindow.isFullScreen()) {
-      mainWindow.setFullScreen(true)
-    }
-    setTimeout(() => {
-      if (mainWindow && !mainWindow.isFullScreen()) {
-        mainWindow.setFullScreen(true)
-      }
-    }, 800)
+    forceFullscreen('ready-to-show')
+    setTimeout(() => forceFullscreen('t+800ms'), 800)
+    setTimeout(() => forceFullscreen('t+3000ms'), 3000)
   })
 
   const devUrl = process.env.VITE_DEV_SERVER_URL
