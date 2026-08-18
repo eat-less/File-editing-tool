@@ -86,17 +86,32 @@ function updateDebug() {
   const dw = design.designWidth || 1920
   const dh = design.designHeight || 1080
   const scale = Math.min(iw / dw, ih / dh)
+  let extra = ''
+  try {
+    const st = stageRef.value && stageRef.value.getDebugInfo
+    if (st) {
+      const d = stageRef.value.getDebugInfo()
+      extra = ' | stageScale=' + d.scale +
+        ' container=' + d.container.join('x') +
+        (d.bg ? ' bgLoaded=' + d.bg.loaded +
+          ' natural=' + d.bg.natural.join('x') +
+          ' rendered=' + d.bg.rendered.join('x') +
+          ' fit=' + d.bg.objectFit
+          : ' bg=null')
+    }
+  } catch {}
   debug.text = 'inner=' + iw + 'x' + ih +
     ' screen=' + window.screen.width + 'x' + window.screen.height +
     ' dpr=' + window.devicePixelRatio +
     ' design=' + dw + 'x' + dh +
-    ' scale=' + scale.toFixed(3)
+    ' scale=' + scale.toFixed(3) + extra
 }
 
 let socket = null
 let bootTimer = null
 let offlineRetryTimer = null
 let navTimer = null
+let debugTimer = null
 let configRef = null
 let touchStartX = 0
 let touchStartY = 0
@@ -267,6 +282,7 @@ onMounted(async () => {
   window.addEventListener('touchend', handleTouchEnd, { passive: true })
   window.addEventListener('resize', updateDebug)
   updateDebug()
+  debugTimer = setInterval(updateDebug, 1000)
   let localIp = ''
   try {
     const cfg = await loadConfig()
@@ -299,6 +315,7 @@ onUnmounted(() => {
   window.removeEventListener('touchstart', handleTouchStart)
   window.removeEventListener('touchend', handleTouchEnd)
   window.removeEventListener('resize', updateDebug)
+  if (debugTimer) clearInterval(debugTimer)
   clearNavTimer()
   if (bootTimer) clearTimeout(bootTimer)
   clearOfflineRetry()

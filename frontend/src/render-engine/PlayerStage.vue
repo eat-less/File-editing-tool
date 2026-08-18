@@ -2,7 +2,7 @@
   <div ref="stageContainer" class="player-stage" :style="{ background: '#000' }">
     <div v-if="currentPageData" class="player-page" :style="pageStyle" :class="transitionClass">
       <div class="player-bg" :style="bgStyle">
-        <img v-if="currentPageData.background?.type === 'image' && currentPageData.background.assetHash"
+        <img ref="bgImgRef" v-if="currentPageData.background?.type === 'image' && currentPageData.background.assetHash"
              :src="assetUrl(currentPageData.background.assetHash)" :style="bgMediaStyle" />
         <video v-else-if="currentPageData.background?.type === 'video' && currentPageData.background.assetHash"
                :src="assetUrl(currentPageData.background.assetHash)" :style="bgMediaStyle"
@@ -123,6 +123,7 @@ const props = defineProps<{
 }>()
 
 const stageContainer = ref<HTMLElement>()
+const bgImgRef = ref<HTMLImageElement>()
 const containerSize = reactive({ width: 0, height: 0 })
 let resizeObserver: ResizeObserver | null = null
 
@@ -1113,6 +1114,24 @@ function setupResizeObserver() {
   if (stageContainer.value) resizeObserver.observe(stageContainer.value)
 }
 
+function getDebugInfo() {
+  const img = bgImgRef.value
+  return {
+    scale: pageStyle.value.transform,
+    container: [Math.round(containerSize.width), Math.round(containerSize.height)],
+    design: [device.value.designWidth || 1920, device.value.designHeight || 1080],
+    fill: props.fill,
+    bg: img
+      ? {
+          natural: [img.naturalWidth, img.naturalHeight],
+          rendered: [img.offsetWidth, img.offsetHeight],
+          objectFit: getComputedStyle(img).objectFit,
+          loaded: img.complete && img.naturalWidth > 0,
+        }
+      : null,
+  }
+}
+
 onMounted(() => {
   setupResizeObserver()
   if (pages.value.length) startAll()
@@ -1132,6 +1151,7 @@ defineExpose({
   getCurrentIndex: () => currentPage.value,
   getPageCount: () => pages.value.length,
   executeAction,
+  getDebugInfo,
 })
 </script>
 
