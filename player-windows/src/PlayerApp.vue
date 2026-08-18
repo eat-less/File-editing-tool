@@ -48,11 +48,13 @@
 
     <div v-if="onlineBadge" class="badge online">在线</div>
     <div v-else-if="offlineBadge && stage === 'playing'" class="badge offline">离线播放</div>
+
+    <div v-if="debug.enabled" class="debug-strip">{{ debug.text }}</div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import PlayerStage from '@/render-engine/PlayerStage.vue'
 import { loadConfig } from './config.js'
 import { createDeviceSocket } from './deviceSocket.js'
@@ -75,6 +77,21 @@ const currentIndex = ref(0)
 const pageCount = ref(1)
 const navHidden = ref(false)
 const navShowIndicator = ref(true)
+const debug = reactive({ enabled: true, text: '' })
+
+function updateDebug() {
+  const design = (configRef && configRef.device) || {}
+  const iw = window.innerWidth
+  const ih = window.innerHeight
+  const dw = design.designWidth || 1920
+  const dh = design.designHeight || 1080
+  const scale = Math.min(iw / dw, ih / dh)
+  debug.text = 'inner=' + iw + 'x' + ih +
+    ' screen=' + window.screen.width + 'x' + window.screen.height +
+    ' dpr=' + window.devicePixelRatio +
+    ' design=' + dw + 'x' + dh +
+    ' scale=' + scale.toFixed(3)
+}
 
 let socket = null
 let bootTimer = null
@@ -197,6 +214,7 @@ function setConfig(cfg) {
   configRef = cfg
   config.value = { device: cfg.device, pages: cfg.pages }
   stage.value = 'playing'
+  updateDebug()
 }
 
 function handleCommand(msg) {
@@ -247,6 +265,8 @@ onMounted(async () => {
   window.addEventListener('wheel', handleWheel, { passive: true })
   window.addEventListener('touchstart', handleTouchStart, { passive: true })
   window.addEventListener('touchend', handleTouchEnd, { passive: true })
+  window.addEventListener('resize', updateDebug)
+  updateDebug()
   let localIp = ''
   try {
     const cfg = await loadConfig()
@@ -278,6 +298,7 @@ onUnmounted(() => {
   window.removeEventListener('wheel', handleWheel)
   window.removeEventListener('touchstart', handleTouchStart)
   window.removeEventListener('touchend', handleTouchEnd)
+  window.removeEventListener('resize', updateDebug)
   clearNavTimer()
   if (bootTimer) clearTimeout(bootTimer)
   clearOfflineRetry()
@@ -354,4 +375,12 @@ onUnmounted(() => {
 .player-nav .nav-btn:hover:not(:disabled) { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.55); }
 .player-nav .nav-btn:disabled { opacity: 0.25; cursor: default; }
 .player-nav .nav-indicator { color: rgba(255,255,255,0.75); font-size: 15px; min-width: 70px; text-align: center; }
+.debug-strip {
+  position: absolute; top: 0; left: 0; z-index: 99;
+  background: rgba(0,0,0,0.55); color: #0f0;
+  font-size: 13px; font-family: Consolas, monospace;
+  padding: 2px 6px; white-space: pre;
+  pointer-events: none;
+}
+
 </style>
