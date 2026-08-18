@@ -183,7 +183,7 @@ const bgMediaStyle = computed(() => {
   if (bg?.blur && bg.blur > 0) filters.push(`blur(${bg.blur}px)`)
   return {
     width: '100%', height: '100%',
-    objectFit: (bg?.objectFit || 'cover') as any,
+    objectFit: (bg?.type === 'image' ? 'fill' : (bg?.objectFit || 'cover')) as any,
     position: 'absolute' as const, inset: 0,
     filter: filters.length ? filters.join(' ') : 'none',
   }
