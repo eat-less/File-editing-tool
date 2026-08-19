@@ -927,7 +927,7 @@ function resolvePageIndex(hotspot: Hotspot, currentIndex: number): number {
 function onElementClick(layer: LayerItem) {
   const h = layer.hotspot
   if (!h?.enabled || h.trigger !== 'click') return
-  if (h.scope && h.scope !== 'local') {
+  if ((h.scope && h.scope !== 'local') || h.action === 'switchScene' || h.action === 'switchProgram') {
     props.onCrossDevice?.(h)
     return
   }
@@ -1166,6 +1166,7 @@ defineExpose({
   background: #000;
 }
 .player-page {
+  flex-shrink: 0;
   transform-origin: center center;
   background: #000;
 }

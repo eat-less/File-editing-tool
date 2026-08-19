@@ -3,6 +3,7 @@
     <div v-if="visible" class="preview-overlay" :class="{ fullscreen: isFullscreen }">
       <div class="preview-toolbar">
         <span>{{ pageName }}</span>
+        <span style="color:#999;font-size:12px">画布 {{ editorStore.device.designWidth }}×{{ editorStore.device.designHeight }}</span>
         <el-space>
           <el-button size="small" @click="toggleFullscreen">{{ isFullscreen ? '退出全屏' : '全屏' }}</el-button>
           <el-button size="small" @click="close">关闭</el-button>

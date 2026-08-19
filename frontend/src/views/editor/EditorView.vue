@@ -49,6 +49,9 @@
       <span style="margin-left:auto;color:#999" v-if="editorStore.selectedElement">
         x:{{ Math.round(editorStore.selectedElement.x) }} y:{{ Math.round(editorStore.selectedElement.y) }}
       </span>
+      <span style="color:#fff;background:rgba(255,255,255,0.15);padding:1px 8px;border-radius:4px;margin-left:8px">
+        画布 {{ editorStore.device.designWidth }}×{{ editorStore.device.designHeight }}
+      </span>
     </div>
     <PreviewModal v-model:visible="showPreview" />
     <ExportDialog ref="exportDialogRef" :program-id="editorStore.programId" />
