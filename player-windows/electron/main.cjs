@@ -6,6 +6,7 @@ const { pathToFileURL } = require('url')
 
 app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-gpu')
+app.commandLine.appendSwitch('force-device-scale-factor', '1')
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
