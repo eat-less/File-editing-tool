@@ -27,6 +27,9 @@ logs/
 frontend/dist/
 player-windows/dist/
 
+# --- 播放器本机配置（每台机器各自维护） ---
+player-windows/player.config.json
+
 # --- 备份 ---
 *.bak
 backup/
