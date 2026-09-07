@@ -27,7 +27,7 @@
     <div v-else-if="stage === 'waiting'" class="overlay">
       <div class="status-text">等待配置</div>
       <div class="status-hint">请先在管理端为本设备编辑并导出节目</div>
-      <div class="status-hint small">设备编码：{{ deviceCode }}</div>
+      <div class="status-hint small">设备IP：{{ deviceIp || '未知' }}</div>
     </div>
 
     <div v-else-if="stage === 'downloading'" class="overlay">
@@ -66,7 +66,7 @@ const progressDone = ref(0)
 const progressTotal = ref(0)
 const config = ref(null)
 const errorMsg = ref('')
-const deviceCode = ref('DEV-001')
+const deviceIp = ref('')
 const serverUrl = ref('')
 const year = new Date().getFullYear()
 const onlineBadge = ref(false)
@@ -80,6 +80,7 @@ const currentScene = ref('')
 let socket = null
 let bootTimer = null
 let offlineRetryTimer = null
+let waitingRetryTimer = null
 let navTimer = null
 let configRef = null
 let touchStartX = 0
@@ -91,7 +92,7 @@ function assetUrl(hash) {
 
 function onCrossDevice(hotspot) {
   if (!socket || !configRef) return
-  const msg = buildDeviceAction(hotspot, deviceCode.value)
+  const msg = buildDeviceAction(hotspot, deviceIp.value)
   socket.sendDeviceAction(msg)
 }
 
@@ -130,11 +131,13 @@ function clearNavTimer() {
 
 async function handleSync() {
   clearOfflineRetry()
+  clearWaitingRetry()
   if (!serverUrl.value) return
   try {
-    const sync = await fetchSync(serverUrl.value, deviceCode.value)
+    const sync = await fetchSync(serverUrl.value, deviceIp.value)
     if (!sync.published) {
       stage.value = 'waiting'
+      waitingRetryTimer = setTimeout(handleSync, 20000)
       return
     }
     currentScene.value = sync.scene_id || ''
@@ -238,6 +241,10 @@ function clearOfflineRetry() {
   if (offlineRetryTimer) { clearTimeout(offlineRetryTimer); offlineRetryTimer = null }
 }
 
+function clearWaitingRetry() {
+  if (waitingRetryTimer) { clearTimeout(waitingRetryTimer); waitingRetryTimer = null }
+}
+
 function handleKeydown(e) {
   if (e.key === 'Escape' && window.playerAPI && window.playerAPI.toggleFullscreen) {
     window.playerAPI.toggleFullscreen()
@@ -276,11 +283,11 @@ onMounted(async () => {
   try {
     const cfg = await loadConfig()
     serverUrl.value = (cfg.serverUrl || 'http://127.0.0.1:8000').replace(/\/+$/, '')
-    deviceCode.value = cfg.deviceCode || 'DEV-001'
     if (window.playerAPI && window.playerAPI.getLocalIp) {
       localIp = await window.playerAPI.getLocalIp()
     }
   } catch {}
+  deviceIp.value = localIp
   const cached = await window.playerAPI.stateRead().catch(() => null)
   if (cached?.activeProgramId && cached.programs?.[cached.activeProgramId]?.config) {
     setConfig(cached.programs[cached.activeProgramId].config)
@@ -288,7 +295,7 @@ onMounted(async () => {
   bootTimer = setTimeout(async () => {
     socket = createDeviceSocket({
       serverUrl: serverUrl.value,
-      deviceCode: deviceCode.value,
+      deviceId: deviceIp.value,
       ipAddress: localIp,
       onUpdate: handleSync,
       onCommand: handleCommand,
@@ -306,6 +313,7 @@ onUnmounted(() => {
   clearNavTimer()
   if (bootTimer) clearTimeout(bootTimer)
   clearOfflineRetry()
+  clearWaitingRetry()
   if (socket) socket.stop()
 })
 </script>

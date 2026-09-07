@@ -35,7 +35,7 @@
           </el-form-item>
           <el-form-item v-if="form.scope === 'devices'" label="目标设备">
             <el-select v-model="form.targetDeviceCodes" multiple style="width:100%" @change="save">
-              <el-option v-for="d in devices" :key="d.unique_code" :label="`${d.name} (${d.unique_code})`" :value="d.unique_code" />
+              <el-option v-for="d in devices" :key="d.unique_code" :label="`${d.name} (${d.ip_address})`" :value="d.unique_code" />
             </el-select>
           </el-form-item>
           <el-form-item label="光标">

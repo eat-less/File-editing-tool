@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.models.exhibit import Device
+from app.models.exhibit import Device, Scene, SceneDevice
 from app.models.project import Program, Asset
 from app.models.distribution import VersionSnapshot
 from app.services.asset_service import collect_asset_hashes
@@ -11,15 +11,29 @@ from app.utils.response import success_response
 router = APIRouter(tags=["播放器"])
 
 
-@router.get("/player/{device_code}/sync")
-async def device_sync(device_code: str, db: AsyncSession = Depends(get_db)):
-    """设备端拉取最新已发布节目配置与素材清单（播放器无登录，直接按设备编码查询）"""
-    result = await db.execute(select(Device).where(Device.unique_code == device_code))
+@router.get("/player/{device_ip}/sync")
+async def device_sync(device_ip: str, db: AsyncSession = Depends(get_db)):
+    """设备端按 IP 拉取最新已发布节目配置与素材清单（播放器无登录，直接按设备 IP 查询）"""
+    result = await db.execute(select(Device).where(Device.ip_address == device_ip))
     device = result.scalar_one_or_none()
     if not device:
         return success_response({"published": False, "reason": "device_not_found"})
 
-    prog_result = await db.execute(select(Program).where(Program.device_id == device.id))
+    scene_id = device.current_scene_id
+    if not scene_id:
+        bound_result = await db.execute(
+            select(SceneDevice.scene_id)
+            .join(Scene, Scene.id == SceneDevice.scene_id)
+            .where(SceneDevice.device_id == device.id)
+            .order_by(Scene.sort_order)
+        )
+        scene_id = bound_result.scalars().first()
+    if not scene_id:
+        return success_response({"published": False, "reason": "no_scene_bound"})
+
+    prog_result = await db.execute(
+        select(Program).where(Program.device_id == device.id, Program.scene_id == scene_id)
+    )
     program = prog_result.scalar_one_or_none()
     if not program or program.published_version <= 0:
         return success_response({"published": False, "reason": "no_published_program"})
@@ -50,6 +64,7 @@ async def device_sync(device_code: str, db: AsyncSession = Depends(get_db)):
         "published": True,
         "program_id": str(program.id),
         "program_name": program.name,
+        "scene_id": str(scene_id),
         "version": program.published_version,
         "config": config,
         "assets": assets,

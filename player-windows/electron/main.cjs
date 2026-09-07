@@ -59,12 +59,13 @@ function ensureDirs() {
 }
 
 function readConfig() {
-  const p = configPath()
-  try {
-    return JSON.parse(fs.readFileSync(p, 'utf-8'))
-  } catch {
-    return { serverUrl: 'http://127.0.0.1:8000', deviceCode: 'DEV-001' }
+  const candidates = [configPath(), path.join(app.getAppPath(), 'player.config.json')]
+  for (const p of candidates) {
+    try {
+      return JSON.parse(fs.readFileSync(p, 'utf-8'))
+    } catch {}
   }
+  return { serverUrl: 'http://127.0.0.1:8000', autoStart: false }
 }
 
 function lookupMediaPath(hash) {
@@ -251,7 +252,10 @@ if (!gotLock) {
     registerIpc()
     registerMediaProtocol()
     createWindow()
-    app.setLoginItemSettings({ openAtLogin: false })
+    if (app.isPackaged) {
+      const cfg = readConfig()
+      app.setLoginItemSettings({ openAtLogin: !!cfg.autoStart })
+    }
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })

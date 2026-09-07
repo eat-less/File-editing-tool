@@ -1,5 +1,5 @@
-export function wsUrl(serverUrl, deviceCode) {
-  return serverUrl.replace(/^http/i, 'ws') + `/api/v1/ws/device/${encodeURIComponent(deviceCode)}`
+export function wsUrl(serverUrl, deviceId) {
+  return serverUrl.replace(/^http/i, 'ws') + `/api/v1/ws/device/${encodeURIComponent(deviceId)}`
 }
 
 async function fetchWithTimeout(url, ms = 20000) {
@@ -12,8 +12,8 @@ async function fetchWithTimeout(url, ms = 20000) {
   }
 }
 
-export async function fetchSync(serverUrl, deviceCode) {
-  const url = `${serverUrl}/api/v1/player/${encodeURIComponent(deviceCode)}/sync`
+export async function fetchSync(serverUrl, deviceId) {
+  const url = `${serverUrl}/api/v1/player/${encodeURIComponent(deviceId)}/sync`
   const res = await fetchWithTimeout(url)
   if (!res.ok) throw new Error(`sync failed: ${res.status}`)
   const json = await res.json()

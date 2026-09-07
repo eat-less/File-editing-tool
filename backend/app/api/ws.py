@@ -51,8 +51,18 @@ async def _update_distribution_log(db, device_code: str, program_id: str, versio
     await db.commit()
 
 
-@router.websocket("/ws/device/{device_code}")
-async def device_websocket(websocket: WebSocket, device_code: str):
+async def _resolve_device(db, identifier: str):
+    result = await db.execute(select(Device).where(Device.ip_address == identifier))
+    return result.scalar_one_or_none()
+
+
+@router.websocket("/ws/device/{device_identifier}")
+async def device_websocket(websocket: WebSocket, device_identifier: str):
+    async with async_session_factory() as db:
+        dev = await _resolve_device(db, device_identifier)
+    device_code = dev.unique_code if dev else device_identifier
+    device_name = dev.name if dev else device_identifier
+
     await ws_manager.connect_device(device_code, websocket)
     try:
         while True:
@@ -61,15 +71,13 @@ async def device_websocket(websocket: WebSocket, device_code: str):
                 msg = json.loads(data)
                 mtype = msg.get("type")
                 if mtype == "device:register":
-                    ip = websocket.client.host if websocket.client else None
-                    if not ip:
-                        ip = msg.get("ip_address")
+                    ip = msg.get("ip_address") or device_identifier
                     async with async_session_factory() as db:
                         await _sync_device(db, device_code, True, ip)
                         await write_log(
                             db, "info", "device",
-                            f"设备 {device_code} 上线注册 (IP: {ip or '未知'})",
-                            detail={"device_code": device_code, "ip_address": ip}
+                            f"设备 {device_name} 上线注册 (IP: {ip or '未知'})",
+                            detail={"device_code": device_code, "device_name": device_name, "ip_address": ip}
                         )
                     await ws_manager.broadcast_to_controls({
                         "type": "deviceStatus", "deviceCode": device_code, "online": True
@@ -96,10 +104,17 @@ async def device_websocket(websocket: WebSocket, device_code: str):
                         )
                 elif mtype == "deviceAction":
                     msg["source"] = msg.get("source", "player")
-                    msg["sourceDeviceCode"] = msg.get("sourceDeviceCode") or device_code
+                    msg["sourceDeviceCode"] = device_code
                     async with async_session_factory() as db:
                         await dispatch_action(db, msg)
                 elif mtype == "deviceStatus":
+                    current_scene = msg.get("currentScene")
+                    if current_scene:
+                        async with async_session_factory() as db:
+                            await db.execute(
+                                update(Device).where(Device.unique_code == device_code).values(current_scene_id=current_scene)
+                            )
+                            await db.commit()
                     await ws_manager.broadcast_to_controls({
                         "type": "deviceStatus",
                         "deviceCode": device_code,

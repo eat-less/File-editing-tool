@@ -1,5 +1,5 @@
-export function createDeviceSocket({ serverUrl, deviceCode, ipAddress, onUpdate, onCommand, onConnectionChange }) {
-  const url = serverUrl.replace(/^http/i, 'ws') + `/api/v1/ws/device/${encodeURIComponent(deviceCode)}`
+export function createDeviceSocket({ serverUrl, deviceId, ipAddress, onUpdate, onCommand, onConnectionChange }) {
+  const url = serverUrl.replace(/^http/i, 'ws') + `/api/v1/ws/device/${encodeURIComponent(deviceId)}`
   let ws = null
   let heartbeat = null
   let reconnectTimer = null
@@ -28,8 +28,8 @@ export function createDeviceSocket({ serverUrl, deviceCode, ipAddress, onUpdate,
     }
     ws.onopen = () => {
       setOnline(true)
-      send({ type: 'device:register', device_code: deviceCode, ip_address: ipAddress || '', version: '1.0.0' })
-      heartbeat = setInterval(() => send({ type: 'device:heartbeat', device_code: deviceCode }), 30000)
+      send({ type: 'device:register', device_code: deviceId, ip_address: ipAddress || '', version: '1.0.0' })
+      heartbeat = setInterval(() => send({ type: 'device:heartbeat', device_code: deviceId }), 30000)
     }
     ws.onmessage = (ev) => {
       let msg

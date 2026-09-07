@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
 from app.config import settings
-from app.models.exhibit import Exhibit, Scene, Device
+from app.models.exhibit import Exhibit, Scene, Device, SceneDevice
 from app.models.project import Program
 from app.utils.minio_utils import build_config_key, upload_json
 from app.utils.path_utils import (
@@ -84,7 +84,9 @@ async def get_scenes(db: AsyncSession, exhibit_id: uuid.UUID) -> list[dict]:
     scenes = list(result.scalars().all())
     data = []
     for sc in scenes:
-        device_count_result = await db.execute(select(func.count(Device.id)).where(Device.scene_id == sc.id))
+        device_count_result = await db.execute(
+            select(func.count(SceneDevice.device_id)).where(SceneDevice.scene_id == sc.id)
+        )
         device_count = device_count_result.scalar() or 0
         data.append({
             "id": sc.id, "exhibit_id": sc.exhibit_id, "name": sc.name,
@@ -100,6 +102,12 @@ async def create_scene(db: AsyncSession, exhibit_id: uuid.UUID, name: str, descr
         raise HTTPException(status_code=404, detail="展项不存在")
     scene = Scene(exhibit_id=exhibit_id, name=name, description=description, sort_order=sort_order)
     db.add(scene)
+    await db.flush()
+    dev_result = await db.execute(select(Device).where(Device.exhibit_id == exhibit_id))
+    for dev in dev_result.scalars().all():
+        db.add(SceneDevice(scene_id=scene.id, device_id=dev.id))
+        if dev.current_scene_id is None:
+            dev.current_scene_id = scene.id
     await db.commit()
     await db.refresh(scene)
     return scene
@@ -128,24 +136,39 @@ async def delete_scene(db: AsyncSession, scene_id: uuid.UUID):
 
 
 async def get_devices(db: AsyncSession, scene_id: uuid.UUID) -> list[Device]:
-    result = await db.execute(select(Device).where(Device.scene_id == scene_id).order_by(Device.created_at.desc()))
+    result = await db.execute(
+        select(Device)
+        .join(SceneDevice, SceneDevice.device_id == Device.id)
+        .where(SceneDevice.scene_id == scene_id)
+        .order_by(Device.created_at.desc())
+    )
     return list(result.scalars().all())
 
 
-async def create_device(db: AsyncSession, scene_id: uuid.UUID, data: dict) -> Device:
-    sc_result = await db.execute(select(Scene).where(Scene.id == scene_id))
-    scene = sc_result.scalar_one_or_none()
-    if not scene:
-        raise HTTPException(status_code=404, detail="场景不存在")
+async def get_exhibit_devices(db: AsyncSession, exhibit_id: uuid.UUID) -> list[Device]:
+    result = await db.execute(select(Device).where(Device.exhibit_id == exhibit_id).order_by(Device.created_at.desc()))
+    return list(result.scalars().all())
+
+
+async def create_device(db: AsyncSession, exhibit_id: uuid.UUID, data: dict) -> Device:
+    ex_result = await db.execute(select(Exhibit).where(Exhibit.id == exhibit_id))
+    if not ex_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="展项不存在")
+    ip_address = data.get("ip_address")
+    if not ip_address:
+        raise HTTPException(status_code=400, detail="IP地址必填，设备按IP绑定")
+    existing_ip = await db.execute(select(Device).where(Device.ip_address == ip_address))
+    if existing_ip.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail=f"IP {ip_address} 已绑定其他设备")
     unique_code = data.get("unique_code") or f"DEV-{uuid.uuid4().hex[:8].upper()}"
     existing = await db.execute(select(Device).where(Device.unique_code == unique_code))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="设备唯一编号已存在")
     device = Device(
-        scene_id=scene_id, exhibit_id=scene.exhibit_id, name=data["name"],
+        exhibit_id=exhibit_id, name=data["name"],
         device_type=data.get("device_type", "pc"),
         unique_code=unique_code,
-        ip_address=data.get("ip_address"),
+        ip_address=ip_address,
         design_width=data.get("design_width", 1920),
         design_height=data.get("design_height", 1080)
     )
@@ -153,6 +176,65 @@ async def create_device(db: AsyncSession, scene_id: uuid.UUID, data: dict) -> De
     await db.commit()
     await db.refresh(device)
     return device
+
+
+async def bind_device_to_scene(db: AsyncSession, scene_id: uuid.UUID, device_id: uuid.UUID):
+    sc_result = await db.execute(select(Scene).where(Scene.id == scene_id))
+    scene = sc_result.scalar_one_or_none()
+    if not scene:
+        raise HTTPException(status_code=404, detail="场景不存在")
+    dev_result = await db.execute(select(Device).where(Device.id == device_id))
+    device = dev_result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="设备不存在")
+    if device.exhibit_id != scene.exhibit_id:
+        raise HTTPException(status_code=400, detail="设备与场景不属于同一展项")
+    existing = await db.execute(
+        select(SceneDevice).where(SceneDevice.scene_id == scene_id, SceneDevice.device_id == device_id)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="设备已绑定到该场景")
+    db.add(SceneDevice(scene_id=scene_id, device_id=device_id))
+    if device.current_scene_id is None:
+        device.current_scene_id = scene_id
+    await db.commit()
+
+
+async def unbind_device_from_scene(db: AsyncSession, scene_id: uuid.UUID, device_id: uuid.UUID):
+    result = await db.execute(
+        select(SceneDevice).where(SceneDevice.scene_id == scene_id, SceneDevice.device_id == device_id)
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="设备未绑定到该场景")
+    await db.delete(row)
+    await db.commit()
+
+
+async def switch_scene(db: AsyncSession, scene_id: uuid.UUID) -> dict:
+    from app.services.ws_manager import ws_manager
+    sc_result = await db.execute(select(Scene).where(Scene.id == scene_id))
+    scene = sc_result.scalar_one_or_none()
+    if not scene:
+        raise HTTPException(status_code=404, detail="场景不存在")
+    device_codes = await _device_codes_by_scene(db, scene_id)
+    dev_result = await db.execute(select(Device).where(Device.exhibit_id == scene.exhibit_id))
+    for dev in dev_result.scalars().all():
+        dev.current_scene_id = scene_id
+    await db.commit()
+    delivered = await ws_manager.broadcast_to_devices(device_codes, {
+        "type": "server:command", "action": "switchScene", "params": {"sceneId": str(scene_id)}
+    })
+    return {"device_codes": device_codes, "delivered": delivered}
+
+
+async def _device_codes_by_scene(db: AsyncSession, scene_id: uuid.UUID) -> list[str]:
+    result = await db.execute(
+        select(Device.unique_code)
+        .join(SceneDevice, SceneDevice.device_id == Device.id)
+        .where(SceneDevice.scene_id == scene_id)
+    )
+    return [row[0] for row in result.all()]
 
 
 async def update_device(db: AsyncSession, device_id: uuid.UUID, data: dict) -> Device:
@@ -165,6 +247,13 @@ async def update_device(db: AsyncSession, device_id: uuid.UUID, data: dict) -> D
         existing = await db.execute(select(Device).where(Device.unique_code == new_code))
         if existing.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="设备唯一编号已存在")
+    new_ip = data.get("ip_address")
+    if new_ip and new_ip != device.ip_address:
+        existing_ip = await db.execute(
+            select(Device).where(Device.ip_address == new_ip, Device.id != device_id)
+        )
+        if existing_ip.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail=f"IP {new_ip} 已绑定其他设备")
     for key, value in data.items():
         if value is not None:
             setattr(device, key, value)
@@ -241,6 +330,22 @@ async def count_programs(db: AsyncSession, filters: dict) -> int:
 
 
 async def create_program(db: AsyncSession, data: dict, creator_id: uuid.UUID | None) -> Program:
+    sc_result = await db.execute(select(Scene).where(Scene.id == data["scene_id"]))
+    scene = sc_result.scalar_one_or_none()
+    dev_result = await db.execute(select(Device).where(Device.id == data["device_id"]))
+    device = dev_result.scalar_one_or_none()
+    if not scene or not device:
+        raise HTTPException(status_code=404, detail="场景或设备不存在")
+    if device.exhibit_id != scene.exhibit_id:
+        raise HTTPException(status_code=400, detail="设备与场景不属于同一展项")
+    bound = await db.execute(
+        select(SceneDevice).where(
+            SceneDevice.scene_id == data["scene_id"],
+            SceneDevice.device_id == data["device_id"],
+        )
+    )
+    if not bound.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="该设备未绑定到该场景，请先在场景中添加设备")
     existing = await db.execute(
         select(Program).where(Program.device_id == data["device_id"], Program.scene_id == data["scene_id"])
     )
@@ -324,7 +429,12 @@ async def copy_program(db: AsyncSession, program_id: uuid.UUID, target_device_id
     for device_id in target_device_ids:
         dev_result = await db.execute(select(Device).where(Device.id == device_id))
         device = dev_result.scalar_one_or_none()
-        if not device:
+        if not device or device.exhibit_id != source.exhibit_id:
+            continue
+        bound = await db.execute(
+            select(SceneDevice).where(SceneDevice.scene_id == source.scene_id, SceneDevice.device_id == device_id)
+        )
+        if not bound.scalar_one_or_none():
             continue
         existing = await db.execute(
             select(Program).where(Program.device_id == device_id, Program.scene_id == source.scene_id)

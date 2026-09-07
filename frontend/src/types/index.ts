@@ -29,8 +29,8 @@ export interface Scene {
 
 export interface Device {
   id: string
-  scene_id: string
   exhibit_id: string
+  current_scene_id?: string
   name: string
   device_type: string
   unique_code: string

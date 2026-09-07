@@ -111,7 +111,7 @@
         <el-form-item label="来源节目">{{ copySource?.name || '' }}</el-form-item>
         <el-form-item label="目标设备" required>
           <el-select v-model="copyTargetDeviceIds" multiple placeholder="选择目标设备（可多选）" style="width:100%">
-            <el-option v-for="d in copyTargetDevices" :key="d.id" :label="`${d.name} (${d.unique_code})`" :value="d.id" />
+            <el-option v-for="d in copyTargetDevices" :key="d.id" :label="`${d.name} (${d.ip_address})`" :value="d.id" />
           </el-select>
         </el-form-item>
       </el-form>

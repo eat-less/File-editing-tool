@@ -47,14 +47,14 @@ export const useProjectStore = defineStore('project', () => {
     await exhibitApi.deleteScene(id)
   }
 
-  async function fetchDevices(sceneId: string) {
-    const res = await exhibitApi.getDevices(sceneId)
+  async function fetchExhibitDevices(exhibitId: string) {
+    const res = await exhibitApi.getExhibitDevices(exhibitId)
     devices.value = res.data
   }
 
-  async function createDeviceItem(sceneId: string, data: any) {
-    await exhibitApi.createDevice(sceneId, data)
-    await fetchDevices(sceneId)
+  async function createExhibitDeviceItem(exhibitId: string, data: any) {
+    await exhibitApi.createExhibitDevice(exhibitId, data)
+    await fetchExhibitDevices(exhibitId)
   }
 
   async function updateDeviceItem(id: string, data: any) {
@@ -73,7 +73,7 @@ export const useProjectStore = defineStore('project', () => {
     exhibits, scenes, devices,
     fetchExhibits, createExhibitItem, updateExhibitItem, deleteExhibitItem,
     fetchScenes, createSceneItem, updateSceneItem, deleteSceneItem,
-    fetchDevices, createDeviceItem, updateDeviceItem, deleteDeviceItem,
+    fetchExhibitDevices, createExhibitDeviceItem, updateDeviceItem, deleteDeviceItem,
     fetchDeviceStatus
   }
 })

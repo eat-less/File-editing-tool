@@ -55,8 +55,8 @@ class SceneResponse(BaseModel):
 class DeviceCreate(BaseModel):
     name: str
     device_type: str
+    ip_address: str
     unique_code: Optional[str] = None
-    ip_address: Optional[str] = None
     design_width: int = 1920
     design_height: int = 1080
 
@@ -69,12 +69,17 @@ class DeviceUpdate(BaseModel):
     config_file_path: Optional[str] = None
     design_width: Optional[int] = None
     design_height: Optional[int] = None
+    current_scene_id: Optional[uuid.UUID] = None
+
+
+class SceneDeviceBind(BaseModel):
+    device_id: uuid.UUID
 
 
 class DeviceResponse(BaseModel):
     id: uuid.UUID
-    scene_id: uuid.UUID
     exhibit_id: uuid.UUID
+    current_scene_id: Optional[uuid.UUID] = None
     name: str
     device_type: str
     unique_code: str

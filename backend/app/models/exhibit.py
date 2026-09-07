@@ -1,9 +1,21 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, ForeignKey, Integer, DateTime, Text, func
+from sqlalchemy import String, ForeignKey, Integer, DateTime, Text, func, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
+
+
+class SceneDevice(Base):
+    __tablename__ = "scene_devices"
+    __table_args__ = (UniqueConstraint("scene_id", "device_id", name="uq_scene_device"),)
+
+    scene_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("scenes.id", ondelete="CASCADE"), primary_key=True
+    )
+    device_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("devices.id", ondelete="CASCADE"), primary_key=True
+    )
 
 
 class Exhibit(Base):
@@ -33,15 +45,17 @@ class Scene(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     exhibit = relationship("Exhibit", back_populates="scenes")
-    devices = relationship("Device", back_populates="scene", cascade="all, delete-orphan")
+    devices = relationship("Device", secondary="scene_devices", back_populates="scenes")
 
 
 class Device(Base):
     __tablename__ = "devices"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    scene_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("scenes.id", ondelete="CASCADE"), nullable=False)
     exhibit_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("exhibits.id", ondelete="CASCADE"), nullable=False)
+    current_scene_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("scenes.id", ondelete="SET NULL"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     device_type: Mapped[str] = mapped_column(String(50), nullable=False)
     unique_code: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
@@ -54,5 +68,5 @@ class Device(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    scene = relationship("Scene", back_populates="devices")
     exhibit = relationship("Exhibit", back_populates="devices")
+    scenes = relationship("Scene", secondary="scene_devices", back_populates="devices")

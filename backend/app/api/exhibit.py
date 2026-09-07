@@ -2,7 +2,7 @@ import uuid
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.schemas.exhibit import ExhibitCreate, ExhibitUpdate, SceneCreate, SceneUpdate, DeviceCreate, DeviceUpdate
+from app.schemas.exhibit import ExhibitCreate, ExhibitUpdate, SceneCreate, SceneUpdate, DeviceCreate, DeviceUpdate, SceneDeviceBind
 from app.services import project_service as ps
 from app.services.auth_service import get_current_user
 from app.services.log_service import write_log
@@ -80,23 +80,64 @@ async def remove_scene(scene_id: uuid.UUID, request: Request, db: AsyncSession =
 @router.get("/scenes/{scene_id}/devices")
 async def list_devices(scene_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     devices = await ps.get_devices(db, scene_id)
-    return success_response([{
-        "id": str(d.id), "scene_id": str(d.scene_id), "exhibit_id": str(d.exhibit_id),
+    return success_response([_device_dict(d) for d in devices])
+
+
+@router.get("/exhibits/{exhibit_id}/devices")
+async def list_exhibit_devices(exhibit_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    devices = await ps.get_exhibit_devices(db, exhibit_id)
+    return success_response([_device_dict(d) for d in devices])
+
+
+@router.post("/exhibits/{exhibit_id}/devices")
+async def new_device(exhibit_id: uuid.UUID, data: DeviceCreate, request: Request,
+                     db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
+    device = await ps.create_device(db, exhibit_id, data.model_dump(exclude_none=True))
+    await write_log(db, "success", "device", f"用户 {current_user.username} 添加设备 {device.name}",
+                    operator_id=current_user.id, ip_address=request.client.host if request.client else None)
+    return success_response({"id": str(device.id), "name": device.name, "unique_code": device.unique_code})
+
+
+@router.post("/scenes/{scene_id}/devices")
+async def bind_device(scene_id: uuid.UUID, data: SceneDeviceBind, request: Request,
+                      db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
+    await ps.bind_device_to_scene(db, scene_id, data.device_id)
+    await write_log(db, "info", "device", f"用户 {current_user.username} 将设备绑定到场景",
+                    operator_id=current_user.id, detail={"scene_id": str(scene_id), "device_id": str(data.device_id)},
+                    ip_address=request.client.host if request.client else None)
+    return success_response(message="设备已绑定到场景")
+
+
+@router.delete("/scenes/{scene_id}/devices/{device_id}")
+async def unbind_device(scene_id: uuid.UUID, device_id: uuid.UUID, request: Request,
+                        db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
+    await ps.unbind_device_from_scene(db, scene_id, device_id)
+    await write_log(db, "info", "device", f"用户 {current_user.username} 将设备从场景解绑",
+                    operator_id=current_user.id, detail={"scene_id": str(scene_id), "device_id": str(device_id)},
+                    ip_address=request.client.host if request.client else None)
+    return success_response(message="设备已从场景解绑")
+
+
+@router.post("/scenes/{scene_id}/switch")
+async def switch_scene(scene_id: uuid.UUID, request: Request,
+                       db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
+    result = await ps.switch_scene(db, scene_id)
+    await write_log(db, "success", "device", f"用户 {current_user.username} 切换场景到 {scene_id}",
+                    operator_id=current_user.id, detail={"scene_id": str(scene_id), **result},
+                    ip_address=request.client.host if request.client else None)
+    return success_response(result)
+
+
+def _device_dict(d):
+    return {
+        "id": str(d.id), "exhibit_id": str(d.exhibit_id),
+        "current_scene_id": str(d.current_scene_id) if d.current_scene_id else None,
         "name": d.name, "device_type": d.device_type, "unique_code": d.unique_code,
         "ip_address": d.ip_address, "config_file_path": d.config_file_path,
         "design_width": d.design_width, "design_height": d.design_height,
         "status": d.status, "last_online": d.last_online.isoformat() if d.last_online else None,
         "created_at": d.created_at.isoformat() if d.created_at else None
-    } for d in devices])
-
-
-@router.post("/scenes/{scene_id}/devices")
-async def new_device(scene_id: uuid.UUID, data: DeviceCreate, request: Request,
-                     db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
-    device = await ps.create_device(db, scene_id, data.model_dump(exclude_none=True))
-    await write_log(db, "success", "device", f"用户 {current_user.username} 添加设备 {device.name}",
-                    operator_id=current_user.id, ip_address=request.client.host if request.client else None)
-    return success_response({"id": str(device.id), "name": device.name, "unique_code": device.unique_code})
+    }
 
 
 @router.put("/devices/{device_id}")
