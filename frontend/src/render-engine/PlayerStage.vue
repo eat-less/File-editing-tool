@@ -109,6 +109,10 @@
 import { ref, computed, watch, onMounted, onUnmounted, reactive } from 'vue'
 import { getIconPath } from '@/utils/icons'
 import { getTypewriterInterval, getEnterDuration } from '@/utils/appearEffect'
+import {
+  normalizeSegments, segmentsTotalDuration, hasSegmentMove, evaluate,
+} from './seqChoreography'
+import type { SeqElementLike, NormalizedSegment } from './seqChoreography'
 import type { ProgramConfig, PageItem, LayerItem, Hotspot } from '@/types'
 
 const props = defineProps<{
@@ -188,18 +192,32 @@ const bgMediaStyle = computed(() => {
 })
 
 function getElementStyle(el: any) {
+  const choreo = choreoPos.value[el.id]
   const animOffset = elementMoveOffset.value[el.id]
   const hasMove = animOffset !== undefined
   const dur = elementMoveDuration.value[el.id] || 3000
-  const left = hasMove ? (animOffset?.x ?? el.x) : el.x
-  const top = hasMove ? (animOffset?.y ?? el.y) : el.y
-  const transition = hasMove ? `left ${dur}ms linear, top ${dur}ms linear` : 'none'
+  const flip = el.type === 'sequenceFrame' && !!seqFlip.value[el.id]
+
+  let left: number
+  let top: number
+  let transition = 'none'
+  if (choreo) {
+    left = choreo.x
+    top = choreo.y
+  } else if (hasMove) {
+    left = animOffset?.x ?? el.x
+    top = animOffset?.y ?? el.y
+    transition = `left ${dur}ms linear, top ${dur}ms linear`
+  } else {
+    left = el.x
+    top = el.y
+  }
   return {
     position: 'absolute' as const,
     left: `${left}px`,
     top: `${top}px`,
     width: `${el.width}px`, height: `${el.height}px`,
-    transform: `rotate(${el.rotation || 0}deg)`,
+    transform: `${flip ? 'scaleX(-1) ' : ''}rotate(${el.rotation || 0}deg)`,
     opacity: el.opacity ?? 1,
     borderRadius: `${el.borderRadius || 0}px`,
     transition,
@@ -607,10 +625,21 @@ function getScrimStyle(el: any): Record<string, string> | null {
   }
 }
 
-// ---------- sequence frames ----------
+// ---------- sequence frames (段编排) ----------
 const seqCurrentImg = ref<Record<string, string>>({})
-const seqTimers = new Map<string, { clear: () => void }>()
+const choreoPos = ref<Record<string, { x: number; y: number }>>({})
+const seqFlip = ref<Record<string, boolean>>({})
 const seqFrameIndices = new Map<string, number>()
+const choreoRuns = new Map<string, {
+  raf: number
+  startT: number
+  segs: NormalizedSegment[]
+  startX: number
+  startY: number
+  wholeLoop: boolean
+  total: number
+  hasMove: boolean
+}>()
 
 function calcSeqFirstSourceDuration(el: any): number {
   const sources = el.seqSources || (el.source?.frames?.length ? [el.source] : [])
@@ -628,118 +657,89 @@ function getSeqSources(el: any): any[] {
   return []
 }
 
+function scheduleChoreo(elId: string, el: any, segs: NormalizedSegment[], startX: number, startY: number) {
+  const prev = choreoRuns.get(elId)
+  if (prev) { cancelAnimationFrame(prev.raf); choreoRuns.delete(elId) }
+
+  const total = segmentsTotalDuration(segs)
+  const wholeLoop = !!el.wholeLoop
+  const hasMove = hasSegmentMove(segs)
+
+  const st0 = evaluate(segs, 0, { startX, startY, wholeLoop })
+  if (st0.src) seqCurrentImg.value = { ...seqCurrentImg.value, [elId]: st0.src }
+  if (hasMove) choreoPos.value = { ...choreoPos.value, [elId]: { x: st0.x, y: st0.y } }
+  seqFlip.value = { ...seqFlip.value, [elId]: !!segs[0]?.flipX }
+
+  const run = {
+    raf: 0,
+    startT: performance.now(),
+    segs,
+    startX,
+    startY,
+    wholeLoop,
+    total,
+    hasMove,
+  }
+
+  const step = () => {
+    const elapsedSec = (performance.now() - run.startT) / 1000
+    const st = evaluate(run.segs, elapsedSec, { startX: run.startX, startY: run.startY, wholeLoop: run.wholeLoop })
+    if (run.hasMove) {
+      choreoPos.value = { ...choreoPos.value, [elId]: { x: st.x, y: st.y } }
+    }
+    const seg = run.segs[st.segIndex]
+    const flip = seg?.flipX ?? false
+    if (flip !== seqFlip.value[elId]) {
+      seqFlip.value = { ...seqFlip.value, [elId]: flip }
+    }
+    if (st.src) {
+      seqCurrentImg.value = { ...seqCurrentImg.value, [elId]: st.src }
+    }
+    const finished = run.total > 0 && Number.isFinite(run.total) && !run.wholeLoop && elapsedSec >= run.total
+    if (finished) {
+      choreoRuns.delete(elId)
+      return
+    }
+    run.raf = requestAnimationFrame(step)
+  }
+  run.raf = requestAnimationFrame(step)
+  choreoRuns.set(elId, run)
+}
+
 function startSequenceAnimations() {
   stopSequenceAnimations()
   const img: Record<string, string> = {}
+  const pos: Record<string, { x: number; y: number }> = {}
 
   pages.value.forEach(page => {
     page.layers.forEach(layer => {
       if (layer.element.type !== 'sequenceFrame') return
-      const el = layer.element
-      const sources = getSeqSources(el)
-      if (sources.length === 0) return
-
-      const firstFrames = sources[0]?.frames || []
-      if (firstFrames[0]) img[el.id] = firstFrames[0].src
-
-      if (el.autoplay === false) return
-
-      const direction = el.direction || 'forward'
-      const fps = el.frameRate || 30
-      const cycleMode = el.cycleMode || 'manual'
-
-      let seqIdx = 0
-      let frameIdx = 0
-      let dir = 1
-      let currentLoop = 1
-      let timerId: ReturnType<typeof setInterval> | null = null
-
-      function advanceToNext() {
-        if (timerId) { clearInterval(timerId); timerId = null }
-        seqIdx++
-        if (seqIdx >= sources.length) {
-          if (cycleMode === 'auto' || cycleMode === 'both') {
-            seqIdx = 0
-            startSource()
-          }
-        } else {
-          startSource()
-        }
+      const el: any = layer.element
+      const segs = normalizeSegments(el as SeqElementLike)
+      if (!segs.length) return
+      if (el.autoplay === false) {
+        const f0 = segs[0]?.frames[0]
+        if (f0) img[el.id] = f0.src
+        return
       }
-
-      function startSource() {
-        if (timerId) { clearInterval(timerId); timerId = null }
-        const source = sources[seqIdx]
-        if (!source) return
-        const frames = source?.frames || []
-        if (frames.length === 0) { advanceToNext(); return }
-
-        const loopCount = source.loopCount || 1
-        const isInfinite = loopCount === -1
-        frameIdx = 0
-        currentLoop = 1
-        dir = 1
-        seqFrameIndices.set(el.id, 0)
-
-        if (frames.length === 1) {
-          img[el.id] = frames[0].src
-          seqCurrentImg.value = { ...img }
-          advanceToNext()
-          return
-        }
-
-        timerId = setInterval(() => {
-          const total = frames.length
-          if (direction === 'forward') {
-            frameIdx++
-            if (frameIdx >= total) {
-              if (isInfinite || currentLoop < loopCount) {
-                frameIdx = 0
-                if (!isInfinite) currentLoop++
-              } else {
-                advanceToNext()
-                return
-              }
-            }
-          } else if (direction === 'reverse') {
-            frameIdx--
-            if (frameIdx < 0) {
-              if (isInfinite || currentLoop < loopCount) {
-                frameIdx = total - 1
-                if (!isInfinite) currentLoop++
-              } else {
-                advanceToNext()
-                return
-              }
-            }
-          } else if (direction === 'alternate') {
-            frameIdx += dir
-            if (frameIdx >= total) { frameIdx = total - 2; dir = -1 }
-            else if (frameIdx < 0) {
-              frameIdx = 1
-              dir = 1
-              if (!isInfinite && currentLoop >= loopCount) { advanceToNext(); return }
-              if (!isInfinite) currentLoop++
-            }
-          }
-          frameIdx = Math.max(0, Math.min(total - 1, frameIdx))
-          img[el.id] = frames[frameIdx]?.src
-          seqFrameIndices.set(el.id, frameIdx)
-          seqCurrentImg.value = { ...img }
-        }, 1000 / fps)
-      }
-
-      startSource()
-      seqTimers.set(el.id, { clear: () => { if (timerId) clearInterval(timerId) } })
+      const startX = el.x ?? 0
+      const startY = el.y ?? 0
+      const st0 = evaluate(segs, 0, { startX, startY, wholeLoop: !!el.wholeLoop })
+      if (st0.src) img[el.id] = st0.src
+      if (hasSegmentMove(segs)) pos[el.id] = { x: startX, y: startY }
+      scheduleChoreo(el.id, el, segs, startX, startY)
     })
   })
   seqCurrentImg.value = img
+  choreoPos.value = { ...choreoPos.value, ...pos }
 }
 
 function stopSequenceAnimations() {
-  seqTimers.forEach(t => t.clear())
-  seqTimers.clear()
+  choreoRuns.forEach(r => cancelAnimationFrame(r.raf))
+  choreoRuns.clear()
   seqCurrentImg.value = {}
+  choreoPos.value = {}
+  seqFlip.value = {}
 }
 
 // ---------- sequence scrub ----------
@@ -811,6 +811,8 @@ function applyMoveAnimations() {
     for (const anim of animations) {
       if (anim.type !== 'move' || !anim.params) continue
       const el = layer.element
+      // 含段位移的序列帧由段编排驱动位置，跳过通用 move 动画；纯旧多源(无段位移)仍走旧逻辑
+      if (el.type === 'sequenceFrame' && hasSegmentMove(normalizeSegments(el as SeqElementLike))) continue
       const from = anim.params.from || {}
       const to = anim.params.to || {}
 
