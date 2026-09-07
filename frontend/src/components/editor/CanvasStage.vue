@@ -41,6 +41,7 @@ import ContainerElement from './elements/ContainerElement.vue'
 import SequenceFrameElement from './elements/SequenceFrameElement.vue'
 import ButtonElement from './elements/ButtonElement.vue'
 import { isCrossDevice, resolvePageIndex } from '@/utils/hotspotAction'
+import { normalizeSegments, hasSegmentMove } from '@/render-engine/seqChoreography'
 
 const editorStore = useEditorStore()
 const stageContainer = ref<HTMLElement>()
@@ -309,6 +310,8 @@ function playEntryAnimations() {
         }
 
         if (anim.type === 'move' && layer.element.type === 'sequenceFrame') {
+          // 含段位移的序列帧由播放器段编排驱动，编辑器画布不预览位移
+          if (hasSegmentMove(normalizeSegments(layer.element as any))) continue
           const seqDur = calcSeqFirstSourceDuration(layer.element)
           if (seqDur > 0) {
             const node2 = node

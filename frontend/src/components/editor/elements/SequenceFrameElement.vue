@@ -246,10 +246,10 @@ onBeforeUnmount(() => {
 
 function onDragEnd(e: any) {
   const node = e.target
-  editorStore.updateElement(props.element.id, {
-    x: Math.round(node.x()),
-    y: Math.round(node.y())
-  })
+  const dx = Math.round(node.x() - (props.element.x || 0))
+  const dy = Math.round(node.y() - (props.element.y || 0))
+  if (dx === 0 && dy === 0) return
+  editorStore.moveElementWithSeqTargets(props.element.id, dx, dy)
 }
 
 function onTransformEnd(e: any) {

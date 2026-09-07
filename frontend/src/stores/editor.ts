@@ -135,7 +135,13 @@ export const useEditorStore = defineStore('editor', () => {
     layer.name = seqData.folderName || '序列帧'
     const frames = (seqData.frames || []).map((f: any) => ({ src: f.src, index: f.index }))
     layer.element.source = { type: 'folder', frames }
-    layer.element.seqSources = [{ type: 'folder', frames, name: seqData.folderName || '序列帧', frameCount: frames.length, loopCount: 1 }]
+    layer.element.autoplay = true
+    layer.element.wholeLoop = false
+    layer.element.seqSources = [{
+      type: 'folder', frames, name: seqData.folderName || '序列帧', frameCount: frames.length,
+      loopCount: 1, fps: undefined, direction: 'forward', flipX: false,
+      move: { enabled: false, to: { x, y } },
+    }]
     currentPage.value.layers.push(layer)
     selectedLayerIds.value = [layer.element.id]
     pushHistory()
@@ -280,6 +286,25 @@ export const useEditorStore = defineStore('editor', () => {
         break
       }
     }
+  }
+
+  function moveElementWithSeqTargets(id: string, dx: number, dy: number) {
+    if (!currentPage.value) return
+    pushHistory()
+    const layer = currentPage.value.layers.find(l => l.element.id === id)
+    if (layer) {
+      layer.element.x = Math.round((layer.element.x || 0) + dx)
+      layer.element.y = Math.round((layer.element.y || 0) + dy)
+      const sources = layer.element.seqSources
+      if (Array.isArray(sources)) {
+        for (const s of sources) {
+          const to = s?.move?.to
+          if (to && typeof to.x === 'number') to.x = Math.round(to.x + dx)
+          if (to && typeof to.y === 'number') to.y = Math.round(to.y + dy)
+        }
+      }
+    }
+    pushHistory()
   }
 
   function removeElement(id: string) {
@@ -493,6 +518,7 @@ export const useEditorStore = defineStore('editor', () => {
     addPage, removePage, reorderPages, setCurrentPage,
     addElement, addElementForAsset, addSequenceFrameFromDrag, updateElement, removeElement,
     setCaptionPositions,
+    moveElementWithSeqTargets,
     selectLayer, clearSelection,
     moveLayerUp, moveLayerDown, moveLayerToTop, moveLayerToBottom,
     setLayerVisibility, setLayerLock, reorderLayer,
