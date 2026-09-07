@@ -271,43 +271,112 @@
         <el-collapse-item title="序列帧" name="seq" v-if="el.type === 'sequenceFrame'">
           <el-form label-position="top" size="small">
             <div v-if="!seqSources.length" style="font-size:12px;color:#909399;margin-bottom:8px">从素材库拖入序列帧添加</div>
-            <el-form-item label="序列列表" v-if="seqSources.length">
-              <div style="width:100%">
-                <div v-for="(s, idx) in seqSources" :key="idx" style="display:flex;flex-direction:column;gap:2px;margin-bottom:6px;padding:6px;border:1px solid #ebeef5;border-radius:4px">
-                  <div style="display:flex;align-items:center;gap:4px">
-                    <span style="flex:1;font-size:12px;color:#303133" :title="s.name">{{ idx + 1 }}. {{ s.name }}</span>
-                    <el-button link size="small" type="danger" @click="removeSeqSource(idx)">✕</el-button>
-                  </div>
-                  <div style="display:flex;align-items:center;gap:4px">
-                    <span style="font-size:10px;color:#909399">{{ s.frames?.length || s.frameCount || 0 }}帧</span>
-                    <span style="font-size:10px;color:#909399">|</span>
-                    <span style="font-size:10px;color:#909399">循环</span>
-                    <el-input-number :model-value="s.loopCount ?? 1" size="small" :min="1" :max="99" controls-position="right" style="width:56px" @change="(v: number) => updateSeqProp(idx, 'loopCount', v || 1)" />
-                    <span style="font-size:10px;color:#409eff">{{ calcSegDuration(s).toFixed(1) }}s</span>
-                  </div>
-                </div>
-                <div v-if="seqSources.length > 1" style="font-size:10px;color:#409eff;margin-top:2px">
-                  总时长: {{ totalSeqDuration.toFixed(1) }}s
-                </div>
+
+            <div v-for="(s, idx) in seqSources" :key="idx"
+                 style="border:1px solid #ebeef5;border-radius:4px;padding:6px;margin-bottom:8px">
+              <div style="display:flex;align-items:center;gap:4px">
+                <span style="flex:1;font-size:12px;color:#303133;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                      :title="s.name">段{{ idx + 1 }} · {{ s.name }}</span>
+                <el-button link size="small" :disabled="idx === 0" @click="moveSeqSource(idx, -1)">↑</el-button>
+                <el-button link size="small" :disabled="idx === seqSources.length - 1" @click="moveSeqSource(idx, 1)">↓</el-button>
+                <el-button link size="small" @click="duplicateSeqSource(idx)">⧉</el-button>
+                <el-button link size="small" type="danger" @click="removeSeqSource(idx)">✕</el-button>
               </div>
+
+              <div style="display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap">
+                <div style="display:flex;align-items:center;gap:2px">
+                  <span style="font-size:10px;color:#909399">帧率</span>
+                  <el-input-number :model-value="s.fps || undefined" :min="1" :max="60" size="small"
+                                   controls-position="right" style="width:60px" placeholder="全局"
+                                   @change="(v: number | undefined) => updateSeqProp(idx, 'fps', v)" />
+                </div>
+                <div style="display:flex;align-items:center;gap:2px">
+                  <span style="font-size:10px;color:#909399">循环</span>
+                  <el-select :model-value="s.loopCount ?? 1" size="small" style="width:64px"
+                             @change="(v: number) => updateSeqProp(idx, 'loopCount', v)">
+                    <el-option v-for="n in 20" :key="n" :label="String(n)" :value="n" />
+                    <el-option label="∞" :value="-1" />
+                  </el-select>
+                </div>
+                <div style="display:flex;align-items:center;gap:2px">
+                  <span style="font-size:10px;color:#909399">方向</span>
+                  <el-select :model-value="s.direction || 'forward'" size="small" style="width:70px"
+                             @change="(v: string) => updateSeqProp(idx, 'direction', v)">
+                    <el-option label="正向" value="forward" />
+                    <el-option label="反向" value="reverse" />
+                    <el-option label="往复" value="alternate" />
+                  </el-select>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px">
+                  <span style="font-size:10px;color:#909399">镜像</span>
+                  <el-switch :model-value="!!s.flipX" size="small"
+                             @change="(v: string | number | boolean) => updateSeqProp(idx, 'flipX', !!v)" />
+                </div>
+                <span style="flex:1"></span>
+                <span style="font-size:11px;color:#409eff">{{ segDurationLabel(s) }}</span>
+              </div>
+
+              <div style="margin-top:4px;border-top:1px dashed #ebeef5;padding-top:4px">
+                <div style="display:flex;align-items:center;gap:6px">
+                  <span style="font-size:11px;color:#606266">位移</span>
+                  <el-radio-group :model-value="s.move?.enabled ? 'move' : 'stay'" size="small"
+                                  @change="(v: string) => setSeqMoveEnabled(idx, v === 'move')">
+                    <el-radio-button value="stay">静止</el-radio-button>
+                    <el-radio-button value="move">移动</el-radio-button>
+                  </el-radio-group>
+                </div>
+                <template v-if="s.move?.enabled">
+                  <div style="display:flex;align-items:center;gap:4px;margin-top:4px">
+                    <span style="font-size:11px;color:#909399">终点X</span>
+                    <el-input-number :model-value="s.move?.to?.x ?? 0" :step="10" size="small"
+                                     controls-position="right" style="width:100%"
+                                     @change="(v: number | undefined) => updateSeqMoveTo(idx, 'x', v)" />
+                    <span style="font-size:11px;color:#909399">Y</span>
+                    <el-input-number :model-value="s.move?.to?.y ?? 0" :step="10" size="small"
+                                     controls-position="right" style="width:100%"
+                                     @change="(v: number | undefined) => updateSeqMoveTo(idx, 'y', v)" />
+                  </div>
+                  <div style="margin-top:4px;text-align:right">
+                    <el-button size="small" @click="applyCurrentPosToMove(idx)">记录当前位置</el-button>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <div v-if="seqSources.length" style="font-size:10px;color:#909399;margin-bottom:6px">
+              总时长: {{ totalSeqDurationLabel }}
+              <span v-if="seqSources.length > 1 && hasSeqMove" style="color:#e6a23c">
+                （页面自动切换时长需大于总时长，否则会被截断）
+              </span>
+            </div>
+
+            <el-form-item label="默认帧率(段的兜底)">
+              <el-input-number v-model="el.frameRate" :min="1" :max="60" controls-position="right" style="width:100%"
+                               @change="update('frameRate', el.frameRate)" />
             </el-form-item>
-            <el-form-item v-if="seqSources.length > 1" label="循环模式">
-              <el-select :model-value="el.cycleMode || 'manual'" style="width:100%" @change="(v: string) => update('cycleMode', v)">
-                <el-option label="仅手动" value="manual" />
-                <el-option label="仅自动" value="auto" />
-                <el-option label="自动+手动" value="both" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="帧率"><el-input-number v-model="el.frameRate" :min="1" :max="60" controls-position="right" style="width:100%" @change="update('frameRate', el.frameRate)" /></el-form-item>
-            <el-form-item label="方向">
+            <el-form-item label="全局方向(段的兜底)">
               <el-select v-model="el.direction" style="width:100%" @change="update('direction', el.direction)">
-                <el-option label="正向" value="forward" /><el-option label="反向" value="reverse" />
+                <el-option label="正向" value="forward" />
+                <el-option label="反向" value="reverse" />
                 <el-option label="交替" value="alternate" />
               </el-select>
             </el-form-item>
-            <el-form-item label="自动播放"><el-switch v-model="el.autoplay" @change="update('autoplay', el.autoplay)" /></el-form-item>
-            <el-form-item label="拖拽控制"><el-switch v-model="el.scrubEnabled" @change="update('scrubEnabled', el.scrubEnabled)" /></el-form-item>
-            <el-form-item v-if="el.scrubEnabled" label="灵敏度"><el-input-number v-model="el.scrubSensitivity" :min="1" :max="100" controls-position="right" style="width:100%" @change="update('scrubSensitivity', el.scrubSensitivity)" /></el-form-item>
+            <el-form-item label="自动播放">
+              <el-switch v-model="el.autoplay" @change="update('autoplay', el.autoplay)" />
+            </el-form-item>
+            <el-form-item label="整体循环">
+              <el-switch v-model="el.wholeLoop" @change="update('wholeLoop', el.wholeLoop)" />
+            </el-form-item>
+
+            <template v-if="!hasSeqMove && seqSources.length <= 1">
+              <el-form-item label="拖拽控制">
+                <el-switch v-model="el.scrubEnabled" @change="update('scrubEnabled', el.scrubEnabled)" />
+              </el-form-item>
+              <el-form-item v-if="el.scrubEnabled" label="灵敏度">
+                <el-input-number v-model="el.scrubSensitivity" :min="1" :max="100" controls-position="right"
+                                 style="width:100%" @change="update('scrubSensitivity', el.scrubSensitivity)" />
+              </el-form-item>
+            </template>
           </el-form>
         </el-collapse-item>
       </el-collapse>
@@ -345,7 +414,7 @@ function findSelectedElement() {
 watch(() => {
   const elem = findSelectedElement()
   if (!elem) return 'none'
-  return `${editorStore.selectedLayerIds.join(',')}|${elem.x},${elem.y},${elem.width},${elem.height},${elem.rotation},${elem.opacity}|${JSON.stringify(elem.srcs)}|${JSON.stringify(elem.srcNames)}|${JSON.stringify(elem.captions)}|${JSON.stringify(elem.seqSources)}|${JSON.stringify(elem.captionPositions)}`
+  return `${editorStore.selectedLayerIds.join(',')}|${elem.x},${elem.y},${elem.width},${elem.height},${elem.rotation},${elem.opacity}|${JSON.stringify(elem.srcs)}|${JSON.stringify(elem.srcNames)}|${JSON.stringify(elem.captions)}|${JSON.stringify(elem.seqSources)}|${JSON.stringify(elem.captionPositions)}|${elem.frameRate}|${elem.direction}|${elem.autoplay}|${elem.wholeLoop}|${elem.scrubEnabled}|${elem.scrubSensitivity}`
 }, () => {
   if (ignoreStoreUpdate) return
   const elem = findSelectedElement()
@@ -425,6 +494,49 @@ const seqSources = computed(() => {
   return el.value.source?.frames?.length ? [el.value.source] : []
 })
 
+function segFps(s: any): number {
+  return typeof s?.fps === 'number' && s.fps > 0 ? s.fps : (el.value.frameRate || 30)
+}
+function segLoop(s: any): number {
+  if (typeof s?.loopCount === 'number' && s.loopCount !== 0) return s.loopCount < 0 ? -1 : Math.max(1, Math.floor(s.loopCount))
+  return 1
+}
+function segDurationLabel(s: any): string {
+  const frames = s?.frames?.length || s.frameCount || 0
+  const fps = segFps(s)
+  const loop = segLoop(s)
+  const mv = s?.move?.enabled
+    ? ` 移动→(${Math.round(s.move.to?.x ?? 0)}, ${Math.round(s.move.to?.y ?? 0)})`
+    : ' 静止'
+  if (loop === -1) return `${frames}帧@${fps}fps ∞ ${mv}`
+  const dur = (frames / fps) * loop
+  return `${frames}帧@${fps}fps ×${loop} · ${dur.toFixed(1)}s${mv}`
+}
+
+const hasSeqMove = computed(() => seqSources.value.some((s: any) => !!s?.move?.enabled))
+
+const totalSeqDurationLabel = computed(() => {
+  let total = 0
+  for (const s of seqSources.value) {
+    const loop = segLoop(s)
+    if (loop === -1) return '∞'
+    total += ((s?.frames?.length || s.frameCount || 0) / segFps(s)) * loop
+  }
+  return total.toFixed(1) + 's'
+})
+
+function commitSeqSources(sources: any[]) {
+  el.value.seqSources = sources
+  if (sources.length === 0) {
+    el.value.source = { type: 'folder', frames: [] }
+    update('source', el.value.source)
+  } else {
+    el.value.source = sources[0]
+    update('source', el.value.source)
+  }
+  update('seqSources', sources)
+}
+
 function moveSeqSource(idx: number, dir: number) {
   const sources = [...seqSources.value]
   const target = idx + dir
@@ -432,42 +544,58 @@ function moveSeqSource(idx: number, dir: number) {
   const tmp = sources[idx]
   sources[idx] = sources[target]
   sources[target] = tmp
-  el.value.seqSources = sources
-  update('seqSources', sources)
+  commitSeqSources(sources)
 }
 
 function removeSeqSource(idx: number) {
   const sources = [...seqSources.value]
   sources.splice(idx, 1)
-  el.value.seqSources = sources
-  if (sources.length === 0) {
-    el.value.seqSources = []
-    el.value.source = { type: 'folder', frames: [] }
-  } else {
-    el.value.source = sources[0]
-  }
-  update('seqSources', sources)
-  update('source', el.value.source)
+  commitSeqSources(sources)
+}
+
+function duplicateSeqSource(idx: number) {
+  const sources = [...seqSources.value]
+  const src = sources[idx]
+  if (!src) return
+  sources.splice(idx + 1, 0, JSON.parse(JSON.stringify(src)))
+  commitSeqSources(sources)
 }
 
 function updateSeqProp(idx: number, prop: string, value: any) {
   const sources = [...seqSources.value]
   if (!sources[idx]) return
   sources[idx] = { ...sources[idx], [prop]: value }
-  el.value.seqSources = sources
-  update('seqSources', sources)
+  commitSeqSources(sources)
 }
 
-function calcSegDuration(s: any): number {
-  const frames = s.frames?.length || s.frameCount || 0
-  const fps = el.value.frameRate || 30
-  const loop = s.loopCount ?? 1
-  return (frames / fps) * loop
+function setSeqMoveEnabled(idx: number, enabled: boolean) {
+  const sources = [...seqSources.value]
+  if (!sources[idx]) return
+  const cur = sources[idx].move || { enabled: false, to: { x: el.value.x || 0, y: el.value.y || 0 } }
+  sources[idx] = { ...sources[idx], move: { enabled, to: { x: cur.to?.x ?? 0, y: cur.to?.y ?? 0 } } }
+  commitSeqSources(sources)
 }
 
-const totalSeqDuration = computed(() => {
-  return seqSources.value.reduce((sum, s) => sum + calcSegDuration(s), 0)
-})
+function updateSeqMoveTo(idx: number, key: 'x' | 'y', value: any) {
+  const sources = [...seqSources.value]
+  if (!sources[idx]) return
+  const move = sources[idx].move || { enabled: true, to: { x: 0, y: 0 } }
+  const to: { x: number; y: number } = { x: move.to?.x ?? 0, y: move.to?.y ?? 0 }
+  to[key] = value ?? 0
+  sources[idx] = { ...sources[idx], move: { ...move, enabled: move.enabled !== false, to } }
+  commitSeqSources(sources)
+}
+
+function applyCurrentPosToMove(idx: number) {
+  const sources = [...seqSources.value]
+  if (!sources[idx]) return
+  const elem = findSelectedElement()
+  const cx = elem?.x ?? el.value.x ?? 0
+  const cy = elem?.y ?? el.value.y ?? 0
+  const move = sources[idx].move || { enabled: true, to: { x: cx, y: cy } }
+  sources[idx] = { ...sources[idx], move: { ...move, enabled: true, to: { x: cx, y: cy } } }
+  commitSeqSources(sources)
+}
 
 function removeImage(idx: number) {
   const srcs = [...(el.value.srcs || [])]
