@@ -272,8 +272,8 @@
           <el-form label-position="top" size="small">
             <div v-if="!seqSources.length" style="font-size:12px;color:#909399;margin-bottom:8px">从素材库拖入序列帧添加</div>
 
-            <div v-for="(s, idx) in seqSources" :key="idx"
-                 style="border:1px solid #ebeef5;border-radius:4px;padding:6px;margin-bottom:8px">
+            <div v-for="(s, idx) in seqSources" :key="idx" @click="selectSeq(idx)"
+                 :style="{ border: '1px solid ' + (activeSegIdx === idx ? '#409EFF' : '#ebeef5'), borderRadius: '4px', padding: '6px', marginBottom: '8px', cursor: 'default' }">
               <div style="display:flex;align-items:center;gap:4px">
                 <span style="flex:1;font-size:12px;color:#303133;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
                       :title="s.name">段{{ idx + 1 }} · {{ s.name }}</span>
@@ -316,6 +316,14 @@
                 <span style="font-size:11px;color:#409eff">{{ segDurationLabel(s) }}</span>
               </div>
 
+              <div style="display:flex;align-items:center;gap:4px;margin-top:2px">
+                <span style="font-size:10px;color:#909399">框内偏移X</span>
+                <el-input-number :model-value="s.contentX || 0" :step="1" size="small"
+                                 controls-position="right" style="width:90px"
+                                 @change="(v: number | undefined) => updateSeqProp(idx, 'contentX', v || 0)" />
+                <span style="font-size:10px;color:#b1b3b8">px（整段画面左右平移，用于帧内对齐）</span>
+              </div>
+
               <div style="margin-top:4px;border-top:1px dashed #ebeef5;padding-top:4px">
                 <div style="display:flex;align-items:center;gap:6px">
                   <span style="font-size:11px;color:#606266">位移</span>
@@ -348,6 +356,24 @@
               <span v-if="seqSources.length > 1 && hasSeqMove" style="color:#e6a23c">
                 （页面自动切换时长需大于总时长，否则会被截断）
               </span>
+            </div>
+
+            <div v-if="seqSources.length"
+                 style="border:1px dashed #d9ecff;background:#ecf5ff;border-radius:4px;padding:6px;margin-bottom:8px">
+              <div style="font-size:11px;color:#409eff;margin-bottom:4px">
+                帧内对齐捕捉（作用于段 {{ clampSegIdx(activeSegIdx) + 1 }}）
+              </div>
+              <div style="font-size:10px;color:#909399;margin-bottom:4px">
+                开启后，直接在画布上把该元素拖到"人物应站的位置"，再点记录。
+              </div>
+              <template v-if="alignIsActiveForEl">
+                <div style="font-size:10px;color:#606266;margin-bottom:4px">
+                  当前已拖动: 水平 {{ alignDx }}px
+                </div>
+                <el-button size="small" type="primary" :disabled="alignDx === 0" @click="recordAlign">记录当前位置</el-button>
+                <el-button size="small" @click="cancelAlign">取消</el-button>
+              </template>
+              <el-button v-else size="small" @click="beginAlign">拖动对齐</el-button>
             </div>
 
             <el-form-item label="默认帧率(段的兜底)">
@@ -596,6 +622,44 @@ function applyCurrentPosToMove(idx: number) {
   sources[idx] = { ...sources[idx], move: { ...move, enabled: true, to: { x: cx, y: cy } } }
   commitSeqSources(sources)
 }
+
+const activeSegIdx = ref(0)
+
+const alignIsActiveForEl = computed(() => {
+  const elem = findSelectedElement()
+  const cap = editorStore.alignCapture
+  return !!elem && cap.active && cap.elementId === elem.id
+})
+
+const alignDx = computed(() => (alignIsActiveForEl.value ? editorStore.alignCapture.dx : 0))
+
+function clampSegIdx(i: number): number {
+  const n = seqSources.value.length
+  if (!n) return 0
+  return Math.max(0, Math.min(i, n - 1))
+}
+
+function selectSeq(idx: number) {
+  activeSegIdx.value = idx
+}
+
+function beginAlign() {
+  const elem = findSelectedElement()
+  if (!elem) return
+  editorStore.startAlignCapture(elem.id, clampSegIdx(activeSegIdx.value))
+}
+
+function cancelAlign() {
+  editorStore.stopAlignCapture()
+}
+
+function recordAlign() {
+  editorStore.recordAlignCapture()
+}
+
+watch(() => `${editorStore.selectedLayerIds.join(',')}|${findSelectedElement()?.id ?? ''}`, () => {
+  activeSegIdx.value = 0
+})
 
 function removeImage(idx: number) {
   const srcs = [...(el.value.srcs || [])]
