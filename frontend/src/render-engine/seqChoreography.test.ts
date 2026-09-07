@@ -54,6 +54,27 @@ describe('normalizeSegments', () => {
   })
 })
 
+describe('normalizeSegments contentX', () => {
+  it('缺省 contentX = 0', () => {
+    const segs = normalizeSegments({ seqSources: [{ frames: f(2) }] })
+    expect(segs[0].contentX).toBe(0)
+  })
+  it('段级 contentX 透传（允许负数）', () => {
+    const segs = normalizeSegments({
+      seqSources: [
+        { frames: f(2), contentX: 120 },
+        { frames: f(2), contentX: -30 },
+      ],
+    })
+    expect(segs[0].contentX).toBe(120)
+    expect(segs[1].contentX).toBe(-30)
+  })
+  it('legacy source 段 contentX = 0', () => {
+    const segs = normalizeSegments({ source: { frames: f(2) } })
+    expect(segs[0].contentX).toBe(0)
+  })
+})
+
 describe('duration', () => {
   it('segmentDuration = 帧数/fps × loopCount；loopCount=-1 为 Infinity', () => {
     const s = { name: '', frames: f(24), fps: 24, loopCount: 3, direction: 'forward' as const, flipX: false, moveTo: null }

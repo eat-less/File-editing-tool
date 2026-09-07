@@ -9,6 +9,7 @@ export interface RawSegment {
   fps?: number
   direction?: string
   flipX?: boolean
+  contentX?: number
   move?: { enabled?: boolean; to?: { x: number; y: number } }
 }
 
@@ -31,6 +32,7 @@ export interface NormalizedSegment {
   loopCount: number      // 1..99 | -1=无限
   direction: Dir
   flipX: boolean
+  contentX?: number       // 帧内水平偏移(px)，绘制帧时 translateX；normalize 后为数字，缺省 0
   moveTo: { x: number; y: number } | null
 }
 
@@ -75,7 +77,7 @@ export function normalizeSegments(el: SeqElementLike): NormalizedSegment[] {
       m?.enabled && m.to && typeof m.to.x === 'number' && typeof m.to.y === 'number'
         ? { x: m.to.x, y: m.to.y }
         : null
-    return { name: s.name || `段${i + 1}`, frames, fps, loopCount, direction: toDir(s.direction), flipX: !!s.flipX, moveTo }
+    return { name: s.name || `段${i + 1}`, frames, fps, loopCount, direction: toDir(s.direction), flipX: !!s.flipX, contentX: typeof s.contentX === 'number' ? s.contentX : 0, moveTo }
   })
 }
 
