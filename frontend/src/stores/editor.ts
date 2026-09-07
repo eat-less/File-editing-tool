@@ -139,7 +139,7 @@ export const useEditorStore = defineStore('editor', () => {
     layer.element.wholeLoop = false
     layer.element.seqSources = [{
       type: 'folder', frames, name: seqData.folderName || '序列帧', frameCount: frames.length,
-      loopCount: 1, fps: undefined, direction: 'forward', flipX: false,
+      loopCount: 1, fps: undefined, direction: 'forward', flipX: false, contentX: 0,
       move: { enabled: false, to: { x, y } },
     }]
     currentPage.value.layers.push(layer)
@@ -192,7 +192,7 @@ export const useEditorStore = defineStore('editor', () => {
           const el = selLayer.element
           if (!el.seqSources) el.seqSources = []
           const frames = (seqData.frames || []).map((f: any) => ({ src: f.src, index: f.index }))
-          el.seqSources.push({ type: 'folder', frames, name: seqData.folderName || '序列帧', frameCount: frames.length, loopCount: 1 })
+          el.seqSources.push({ type: 'folder', frames, name: seqData.folderName || '序列帧', frameCount: frames.length, loopCount: 1, contentX: 0 })
           pushHistory()
           return
         }
@@ -303,6 +303,59 @@ export const useEditorStore = defineStore('editor', () => {
           if (to && typeof to.y === 'number') to.y = Math.round(to.y + dy)
         }
       }
+    }
+    pushHistory()
+  }
+
+  const alignCapture = ref<{
+    elementId: string
+    segIdx: number
+    baseX: number
+    baseY: number
+    dx: number
+    dy: number
+    active: boolean
+    rev: number
+  }>({ elementId: '', segIdx: 0, baseX: 0, baseY: 0, dx: 0, dy: 0, active: false, rev: 0 })
+
+  function startAlignCapture(id: string, segIdx: number) {
+    if (!currentPage.value) return
+    const layer = currentPage.value.layers.find(l => l.element.id === id)
+    if (!layer) return
+    alignCapture.value = {
+      elementId: id, segIdx, baseX: layer.element.x || 0, baseY: layer.element.y || 0,
+      dx: 0, dy: 0, active: true, rev: alignCapture.value.rev,
+    }
+  }
+
+  function setAlignDelta(dx: number, dy: number) {
+    if (!alignCapture.value.active) return
+    alignCapture.value = { ...alignCapture.value, dx, dy }
+  }
+
+  function stopAlignCapture() {
+    if (!alignCapture.value.active) return
+    alignCapture.value = { ...alignCapture.value, active: false, dx: 0, dy: 0, rev: alignCapture.value.rev + 1 }
+  }
+
+  function recordAlignCapture() {
+    const cap = alignCapture.value
+    if (!cap.active) return
+    if (!currentPage.value) { stopAlignCapture(); return }
+    const layer = currentPage.value.layers.find(l => l.element.id === cap.elementId)
+    if (!layer) { stopAlignCapture(); return }
+    pushHistory()
+    const el = layer.element
+    const seg = (el.seqSources || [])[cap.segIdx]
+    if (seg) {
+      const prev = typeof seg.contentX === 'number' ? seg.contentX : 0
+      seg.contentX = Math.round(prev + cap.dx)
+    }
+    el.x = cap.baseX
+    el.y = cap.baseY
+    alignCapture.value = {
+      elementId: '', segIdx: 0, baseX: 0, baseY: 0, dx: 0, dy: 0,
+      active: false, rev: alignCapture.value.rev + 1,
     }
     pushHistory()
   }
@@ -519,6 +572,7 @@ export const useEditorStore = defineStore('editor', () => {
     addElement, addElementForAsset, addSequenceFrameFromDrag, updateElement, removeElement,
     setCaptionPositions,
     moveElementWithSeqTargets,
+    alignCapture, startAlignCapture, setAlignDelta, stopAlignCapture, recordAlignCapture,
     selectLayer, clearSelection,
     moveLayerUp, moveLayerDown, moveLayerToTop, moveLayerToBottom,
     setLayerVisibility, setLayerLock, reorderLayer,
