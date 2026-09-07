@@ -5,6 +5,7 @@
     <v-text v-if="!hasImage" :config="labelConfig" />
     <v-text :config="infoConfig" />
   </v-group>
+  <v-image v-if="capForMe && ghostImg" :config="ghostImageConfig" />
 </template>
 
 <script setup lang="ts">
@@ -51,6 +52,70 @@ const currentContentX = computed(() => {
   return typeof src?.contentX === 'number' ? src.contentX : 0
 })
 
+const capForMe = computed(() =>
+  editorStore.alignCapture.active && editorStore.alignCapture.elementId === props.element.id)
+
+const capGhost = computed(() => {
+  const cap = editorStore.alignCapture
+  if (!cap.active || cap.elementId !== props.element.id) return null
+  const arr = allSeqSources.value
+  if (cap.segIdx <= 0 || cap.segIdx >= arr.length) return null
+  const prev = arr[cap.segIdx - 1] as any
+  const pf = Array.isArray(prev?.frames) ? prev.frames : []
+  const last = pf[pf.length - 1]
+  if (!last?.src) return null
+  return { src: last.src, contentX: typeof prev.contentX === 'number' ? prev.contentX : 0 }
+})
+
+const ghostImg = ref<HTMLImageElement | null>(null)
+
+const ghostImageConfig = computed(() => {
+  const g = capGhost.value
+  return {
+    x: (props.element.x || 0) + (g?.contentX || 0),
+    y: props.element.y || 0,
+    width: props.element.width || 300,
+    height: props.element.height || 300,
+    rotation: props.element.rotation || 0,
+    opacity: 0.5,
+    listening: false,
+    image: ghostImg.value || undefined,
+  }
+})
+
+function loadGhost() {
+  ghostImg.value = null
+  const g = capGhost.value
+  if (!g) return
+  const img = new Image()
+  img.crossOrigin = 'anonymous'
+  img.onload = () => { ghostImg.value = img }
+  img.src = `/api/v1/assets/${g.src}/file`
+}
+
+function syncCaptureSeg() {
+  if (!capForMe.value) return
+  const idx = editorStore.alignCapture.segIdx
+  if (idx >= 0 && idx < allSeqSources.value.length) currentSeqIdx.value = idx
+  loadGhost()
+  loadFrames()
+}
+
+watch(() => [
+  editorStore.alignCapture.active,
+  editorStore.alignCapture.elementId,
+  editorStore.alignCapture.segIdx,
+], () => {
+  if (capForMe.value) {
+    syncCaptureSeg()
+    return
+  }
+  if (editorStore.alignCapture.elementId === props.element.id) {
+    currentSeqIdx.value = 0
+    loadFrames()
+  }
+})
+
 function onClick(e: any) {
   try { if (e.evt?.stopPropagation) e.evt.stopPropagation(); if (e.cancelBubble !== undefined) e.cancelBubble = true } catch {}
   emit('select', e.evt || e)
@@ -67,7 +132,7 @@ function onDragStart(e: any) {
 const groupConfig = computed(() => ({
   x: props.element.x, y: props.element.y,
   rotation: props.element.rotation, opacity: props.element.opacity,
-  draggable: !props.layer?.locked,
+  draggable: !props.layer?.locked && !capForMe.value,
   visible: props.layer?.visible !== false,
   elementId: props.element.id,
   globalCompositeOperation: props.layer.blendMode !== 'normal' ? props.layer.blendMode : undefined,
@@ -161,6 +226,12 @@ function startAnimation() {
   const frames = frameImages.value
   if (frames.length === 0) return
 
+  if (capForMe.value) {
+    const img0 = frames[0]
+    if (img0 && img0.complete) updateKonvaImage(img0)
+    return
+  }
+
   const source = currentSource.value
   const fps = props.element.frameRate || 30
   const loopCount = source?.loopCount || 1
@@ -242,7 +313,9 @@ function stopAll() {
 }
 
 watch(() => [props.element.source?.frames, props.element.seqSources, props.element.autoplay], () => {
-  currentSeqIdx.value = 0
+  currentSeqIdx.value = capForMe.value
+    ? Math.min(editorStore.alignCapture.segIdx, Math.max(0, allSeqSources.value.length - 1))
+    : 0
   loadFrames()
 }, { immediate: true, deep: true })
 
@@ -255,8 +328,8 @@ function onDragEnd(e: any) {
   const cap = editorStore.alignCapture
   if (cap.active && cap.elementId === props.element.id) {
     editorStore.setAlignDelta(
-      Math.round(node.x() - (cap.baseX || 0)),
-      Math.round(node.y() - (cap.baseY || 0)),
+      Math.round((node.x() - (cap.baseX || 0)) * 10) / 10,
+      Math.round((node.y() - (cap.baseY || 0)) * 10) / 10,
     )
     return
   }

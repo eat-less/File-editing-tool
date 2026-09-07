@@ -349,7 +349,7 @@ export const useEditorStore = defineStore('editor', () => {
     const seg = (el.seqSources || [])[cap.segIdx]
     if (seg) {
       const prev = typeof seg.contentX === 'number' ? seg.contentX : 0
-      seg.contentX = Math.round(prev + cap.dx)
+      seg.contentX = Math.round((prev + cap.dx) * 10) / 10
     }
     el.x = cap.baseX
     el.y = cap.baseY

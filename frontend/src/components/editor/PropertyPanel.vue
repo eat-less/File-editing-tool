@@ -318,9 +318,10 @@
 
               <div style="display:flex;align-items:center;gap:4px;margin-top:2px">
                 <span style="font-size:10px;color:#909399">框内偏移X</span>
-                <el-input-number :model-value="s.contentX || 0" :step="1" size="small"
-                                 controls-position="right" style="width:90px"
-                                 @change="(v: number | undefined) => updateSeqProp(idx, 'contentX', v || 0)" />
+                <el-input-number :model-value="typeof s.contentX === 'number' ? s.contentX : 0"
+                                 :step="0.1" :precision="1" size="small"
+                                 controls-position="right" style="width:100px"
+                                 @change="(v: number | undefined) => updateSeqProp(idx, 'contentX', typeof v === 'number' ? v : 0)" />
                 <span style="font-size:10px;color:#b1b3b8">px（整段画面左右平移，用于帧内对齐）</span>
               </div>
 
@@ -347,6 +348,18 @@
                   <div style="margin-top:4px;text-align:right">
                     <el-button size="small" @click="applyCurrentPosToMove(idx)">记录当前位置</el-button>
                   </div>
+                  <template v-if="segMoveReadout(s, idx)">
+                    <div style="margin-top:2px;font-size:10px;color:#606266">
+                      单循环位移 {{ segMoveReadout(s, idx)!.step.toFixed(1) }}px · 平移速度 {{ segMoveReadout(s, idx)!.speed.toFixed(1) }}px/s
+                    </div>
+                    <div v-if="movingRefIndices(idx).length"
+                         style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">
+                      <span style="font-size:10px;color:#909399">按参考段对齐平移速度:</span>
+                      <el-button v-for="ri in movingRefIndices(idx)" :key="ri" size="small" @click="alignStepTo(idx, ri)">
+                        段{{ ri + 1 }}
+                      </el-button>
+                    </div>
+                  </template>
                 </template>
               </div>
             </div>
@@ -361,19 +374,27 @@
             <div v-if="seqSources.length"
                  style="border:1px dashed #d9ecff;background:#ecf5ff;border-radius:4px;padding:6px;margin-bottom:8px">
               <div style="font-size:11px;color:#409eff;margin-bottom:4px">
-                帧内对齐捕捉（作用于段 {{ clampSegIdx(activeSegIdx) + 1 }}）
-              </div>
-              <div style="font-size:10px;color:#909399;margin-bottom:4px">
-                开启后，直接在画布上把该元素拖到"人物应站的位置"，再点记录。
+                帧内对齐比对（作用于段 {{ clampSegIdx(activeSegIdx) + 1 }}）
               </div>
               <template v-if="alignIsActiveForEl">
-                <div style="font-size:10px;color:#606266;margin-bottom:4px">
-                  当前已拖动: 水平 {{ alignDx }}px
+                <div style="font-size:10px;color:#909399;margin-bottom:4px">
+                  画布已冻结该段首帧，并半透明叠加上一段末帧。用下方按钮或该段"框内偏移X"微调，让两处人物重叠即对准。
                 </div>
-                <el-button size="small" type="primary" :disabled="alignDx === 0" @click="recordAlign">记录当前位置</el-button>
-                <el-button size="small" @click="cancelAlign">取消</el-button>
+                <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px">
+                  <el-button size="small" @click="nudgeContentX(-10)">-10</el-button>
+                  <el-button size="small" @click="nudgeContentX(-1)">-1</el-button>
+                  <el-button size="small" @click="nudgeContentX(-0.1)">-0.1</el-button>
+                  <span style="flex:1"></span>
+                  <el-button size="small" @click="nudgeContentX(0.1)">+0.1</el-button>
+                  <el-button size="small" @click="nudgeContentX(1)">+1</el-button>
+                  <el-button size="small" @click="nudgeContentX(10)">+10</el-button>
+                </div>
+                <el-button size="small" type="primary" @click="cancelAlign">完成(关闭比对)</el-button>
               </template>
-              <el-button v-else size="small" @click="beginAlign">拖动对齐</el-button>
+              <el-button v-else size="small" :disabled="clampSegIdx(activeSegIdx) === 0" @click="beginAlign">开始比对(叠加上一帧参考)</el-button>
+              <div v-if="!alignIsActiveForEl && clampSegIdx(activeSegIdx) === 0" style="font-size:10px;color:#e6a23c;margin-top:4px">
+                请先点击要与之衔接的段（如"转回后的走路段"），第 1 段之前没有参考帧。
+              </div>
             </div>
 
             <el-form-item label="默认帧率(段的兜底)">
@@ -655,6 +676,59 @@ function cancelAlign() {
 
 function recordAlign() {
   editorStore.recordAlignCapture()
+}
+
+function nudgeContentX(delta: number) {
+  const idx = clampSegIdx(activeSegIdx.value)
+  const s = seqSources.value[idx]
+  if (!s) return
+  const cur = typeof s.contentX === 'number' ? s.contentX : 0
+  updateSeqProp(idx, 'contentX', Math.round((cur + delta) * 10) / 10)
+}
+
+function moveFoldStart(idx: number): { x: number; y: number } {
+  let x = el.value.x || 0
+  let y = el.value.y || 0
+  const src = seqSources.value
+  for (let k = 0; k < idx && k < src.length; k++) {
+    const s = src[k]
+    if (s?.move?.enabled && s.move.to) {
+      x = s.move.to.x ?? x
+      y = s.move.to.y ?? y
+    }
+  }
+  return { x, y }
+}
+
+function segMoveReadout(s: any, idx: number): { dist: number; loops: number; step: number; speed: number } | null {
+  if (!s?.move?.enabled || !s.move?.to) return null
+  const loops = segLoop(s)
+  if (loops === -1) return null
+  const frames = s?.frames?.length || s.frameCount || 0
+  if (!frames) return null
+  const start = moveFoldStart(idx)
+  const dist = Math.hypot((s.move.to.x ?? start.x) - start.x, (s.move.to.y ?? start.y) - start.y)
+  if (dist <= 0) return null
+  const fps = segFps(s)
+  const dur = (frames / fps) * loops
+  return { dist, loops, step: dist / loops, speed: dur > 0 ? dist / dur : 0 }
+}
+
+function movingRefIndices(idx: number): number[] {
+  const out: number[] = []
+  seqSources.value.forEach((s: any, k: number) => {
+    if (k === idx) return
+    if (segMoveReadout(s, k)) out.push(k)
+  })
+  return out
+}
+
+function alignStepTo(idx: number, refIdx: number) {
+  const cur = segMoveReadout(seqSources.value[idx], idx)
+  const ref = segMoveReadout(seqSources.value[refIdx], refIdx)
+  if (!cur || !ref || ref.step <= 0) return
+  const loops = Math.max(1, Math.min(99, Math.round(cur.dist / ref.step)))
+  if (loops !== cur.loops) updateSeqProp(idx, 'loopCount', loops)
 }
 
 watch(() => `${editorStore.selectedLayerIds.join(',')}|${findSelectedElement()?.id ?? ''}`, () => {
