@@ -54,7 +54,7 @@
 
         <div v-else-if="layer.element.type === 'sequenceFrame'" class="player-seq">
           <img v-if="seqCurrentImg[layer.element.id]" :src="assetUrl(seqCurrentImg[layer.element.id])"
-               style="width:100%;height:100%;display:block;user-select:none" draggable="false" />
+               :style="seqImgStyle(layer.element.id)" draggable="false" />
           <div v-else class="player-seq-placeholder">序列帧</div>
         </div>
 
@@ -629,6 +629,7 @@ function getScrimStyle(el: any): Record<string, string> | null {
 const seqCurrentImg = ref<Record<string, string>>({})
 const choreoPos = ref<Record<string, { x: number; y: number }>>({})
 const seqFlip = ref<Record<string, boolean>>({})
+const seqContentX = ref<Record<string, number>>({})
 const seqFrameIndices = new Map<string, number>()
 const choreoRuns = new Map<string, {
   raf: number
@@ -657,6 +658,15 @@ function getSeqSources(el: any): any[] {
   return []
 }
 
+function seqImgStyle(elId: string): Record<string, string> {
+  const cx = seqContentX.value[elId]
+  const style: Record<string, string> = {
+    width: '100%', height: '100%', display: 'block', userSelect: 'none',
+  }
+  if (cx) style.transform = `translateX(${cx}px)`
+  return style
+}
+
 function scheduleChoreo(elId: string, el: any, segs: NormalizedSegment[], startX: number, startY: number) {
   const prev = choreoRuns.get(elId)
   if (prev) { cancelAnimationFrame(prev.raf); choreoRuns.delete(elId) }
@@ -669,6 +679,7 @@ function scheduleChoreo(elId: string, el: any, segs: NormalizedSegment[], startX
   if (st0.src) seqCurrentImg.value = { ...seqCurrentImg.value, [elId]: st0.src }
   if (hasMove) choreoPos.value = { ...choreoPos.value, [elId]: { x: st0.x, y: st0.y } }
   seqFlip.value = { ...seqFlip.value, [elId]: !!segs[0]?.flipX }
+  seqContentX.value = { ...seqContentX.value, [elId]: segs[0]?.contentX ?? 0 }
 
   const run = {
     raf: 0,
@@ -691,6 +702,10 @@ function scheduleChoreo(elId: string, el: any, segs: NormalizedSegment[], startX
     const flip = seg?.flipX ?? false
     if (flip !== seqFlip.value[elId]) {
       seqFlip.value = { ...seqFlip.value, [elId]: flip }
+    }
+    const cx = seg?.contentX ?? 0
+    if (cx !== seqContentX.value[elId]) {
+      seqContentX.value = { ...seqContentX.value, [elId]: cx }
     }
     if (st.src) {
       seqCurrentImg.value = { ...seqCurrentImg.value, [elId]: st.src }
@@ -720,6 +735,8 @@ function startSequenceAnimations() {
       if (el.autoplay === false) {
         const f0 = segs[0]?.frames[0]
         if (f0) img[el.id] = f0.src
+        seqFlip.value = { ...seqFlip.value, [el.id]: !!segs[0]?.flipX }
+        seqContentX.value = { ...seqContentX.value, [el.id]: segs[0]?.contentX ?? 0 }
         return
       }
       const startX = el.x ?? 0
@@ -740,6 +757,7 @@ function stopSequenceAnimations() {
   seqCurrentImg.value = {}
   choreoPos.value = {}
   seqFlip.value = {}
+  seqContentX.value = {}
 }
 
 // ---------- sequence scrub ----------
