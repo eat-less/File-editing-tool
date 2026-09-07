@@ -1,5 +1,5 @@
 <template>
-  <v-group :config="groupConfig" @click="onClick" @mousedown="onMouseDown" @dragstart="onDragStart" @dragend="onDragEnd" @transformend="onTransformEnd">
+  <v-group ref="groupRef" :config="groupConfig" @click="onClick" @mousedown="onMouseDown" @dragstart="onDragStart" @dragend="onDragEnd" @transformend="onTransformEnd">
     <v-image ref="konvaImageRef" v-if="hasImage" :config="imageConfig" />
     <v-rect v-else :config="rectConfig" />
     <v-text v-if="!hasImage" :config="labelConfig" />
@@ -8,7 +8,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onBeforeUnmount, nextTick } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useEditorStore } from '@/stores/editor'
 import type { ElementItem, LayerItem } from '@/types'
 
@@ -16,6 +16,7 @@ const props = defineProps<{ element: ElementItem; layer: LayerItem; isSelected: 
 const emit = defineEmits(['select'])
 
 const editorStore = useEditorStore()
+const groupRef = ref<any>(null)
 const konvaImageRef = ref<any>(null)
 const hasImage = ref(false)
 const frameImages = ref<HTMLImageElement[]>([])
@@ -45,6 +46,11 @@ const totalDuration = computed(() => {
 
 const currentSource = computed(() => allSeqSources.value[currentSeqIdx.value])
 
+const currentContentX = computed(() => {
+  const src = allSeqSources.value[currentSeqIdx.value] as any
+  return typeof src?.contentX === 'number' ? src.contentX : 0
+})
+
 function onClick(e: any) {
   try { if (e.evt?.stopPropagation) e.evt.stopPropagation(); if (e.cancelBubble !== undefined) e.cancelBubble = true } catch {}
   emit('select', e.evt || e)
@@ -72,7 +78,7 @@ const groupConfig = computed(() => ({
 }))
 
 const imageConfig = computed(() => ({
-  x: 0, y: 0,
+  x: currentContentX.value, y: 0,
   width: props.element.width || 300,
   height: props.element.height || 300,
   image: frameImages.value[0] || undefined,
@@ -246,11 +252,42 @@ onBeforeUnmount(() => {
 
 function onDragEnd(e: any) {
   const node = e.target
+  const cap = editorStore.alignCapture
+  if (cap.active && cap.elementId === props.element.id) {
+    editorStore.setAlignDelta(
+      Math.round(node.x() - (cap.baseX || 0)),
+      Math.round(node.y() - (cap.baseY || 0)),
+    )
+    return
+  }
   const dx = Math.round(node.x() - (props.element.x || 0))
   const dy = Math.round(node.y() - (props.element.y || 0))
   if (dx === 0 && dy === 0) return
   editorStore.moveElementWithSeqTargets(props.element.id, dx, dy)
 }
+
+watch(() => editorStore.alignCapture.rev, () => {
+  const node = groupRef.value?.getNode()
+  if (!node) return
+  node.position({ x: props.element.x || 0, y: props.element.y || 0 })
+  node.rotation(props.element.rotation || 0)
+  node.getLayer()?.batchDraw()
+})
+
+function applyClip() {
+  const node = groupRef.value?.getNode()
+  if (!node) return
+  const w = props.element.width || 300
+  const h = props.element.height || 300
+  node.clipFunc((ctx: any) => {
+    ctx.beginPath()
+    ctx.rect(0, 0, w, h)
+  })
+  node.getLayer()?.batchDraw()
+}
+
+watch(() => [props.element.width, props.element.height], applyClip)
+onMounted(() => applyClip())
 
 function onTransformEnd(e: any) {
   const node = e.target
