@@ -115,7 +115,7 @@ import {
 import type { SeqElementLike, NormalizedSegment } from './seqChoreography'
 import type { ProgramConfig, PageItem, LayerItem, Hotspot } from '@/types'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   config: ProgramConfig | null
   assetUrl: (hash: string) => string
   onCrossDevice?: (hotspot: Hotspot) => void
@@ -124,7 +124,9 @@ const props = defineProps<{
   autoPlay?: boolean
   videoControls?: boolean
   fill?: boolean
-}>()
+}>(), {
+  autoPlay: true,
+})
 
 const stageContainer = ref<HTMLElement>()
 const containerSize = reactive({ width: 0, height: 0 })
@@ -969,7 +971,28 @@ function onElementClick(layer: LayerItem) {
 
 // ---------- playback control ----------
 let autoTimer: ReturnType<typeof setInterval> | null = null
-let appearLoopTimer: ReturnType<typeof setTimeout> | null = null
+let loopTimer: ReturnType<typeof setTimeout> | null = null
+
+function restartCurrentPageVideos() {
+  const page = currentPageData.value
+  if (!page) return
+  for (const layer of page.layers) {
+    if (layer.element.type !== 'video') continue
+    const v = videoRefs.get(layer.element.id)
+    if (!v) continue
+    try { v.currentTime = 0 } catch {}
+    try { v.play().catch(() => {}) } catch {}
+  }
+}
+
+function replayCurrentPage() {
+  startImageCycling()
+  startVideoCycling()
+  startSequenceAnimations()
+  applyMoveAnimations()
+  applyTextAppearEffects()
+  restartCurrentPageVideos()
+}
 
 function startAutoPlay() {
   stopAutoPlay()
@@ -983,9 +1006,8 @@ function startAutoPlay() {
       switchToPage(currentPage.value, 1)
     }, page.duration)
   } else if (mode === 'loop') {
-    appearLoopTimer = setTimeout(() => {
-      applyTextAppearEffects()
-      applyMoveAnimations()
+    loopTimer = setTimeout(() => {
+      replayCurrentPage()
       startAutoPlay()
     }, page.duration)
   }
@@ -993,7 +1015,7 @@ function startAutoPlay() {
 
 function stopAutoPlay() {
   if (autoTimer) { clearInterval(autoTimer); autoTimer = null }
-  if (appearLoopTimer) { clearTimeout(appearLoopTimer); appearLoopTimer = null }
+  if (loopTimer) { clearTimeout(loopTimer); loopTimer = null }
 }
 
 function reportState() {
@@ -1009,8 +1031,10 @@ function switchToPage(fromIdx: number, direction: number) {
   if (fromIdx + direction < 0) target = pages.value.length - 1
   else if (fromIdx + direction >= pages.value.length) target = 0
   else target = fromIdx + direction
-  currentPage.value = target
-  applyPageTransition(target, direction)
+  if (target !== currentPage.value) {
+    currentPage.value = target
+    applyPageTransition(target, direction)
+  }
   onPageEnter()
 }
 

@@ -28,6 +28,8 @@
       <div class="status-text">等待配置</div>
       <div class="status-hint">请先在管理端为本设备编辑并导出节目</div>
       <div class="status-hint small">设备IP：{{ deviceIp || '未知' }}</div>
+      <div class="status-hint small">服务器：{{ serverUrl || '未知' }}</div>
+      <div v-if="configPath" class="status-hint small">配置文件：{{ configPath }}</div>
     </div>
 
     <div v-else-if="stage === 'downloading'" class="overlay">
@@ -68,6 +70,7 @@ const config = ref(null)
 const errorMsg = ref('')
 const deviceIp = ref('')
 const serverUrl = ref('')
+const configPath = ref('')
 const year = new Date().getFullYear()
 const onlineBadge = ref(false)
 const offlineBadge = ref(false)
@@ -285,6 +288,9 @@ onMounted(async () => {
     serverUrl.value = (cfg.serverUrl || 'http://127.0.0.1:8000').replace(/\/+$/, '')
     if (window.playerAPI && window.playerAPI.getLocalIp) {
       localIp = await window.playerAPI.getLocalIp()
+    }
+    if (window.playerAPI && window.playerAPI.getConfigPath) {
+      configPath.value = (await window.playerAPI.getConfigPath()) || ''
     }
   } catch {}
   deviceIp.value = localIp

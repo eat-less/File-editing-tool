@@ -49,13 +49,41 @@ function stateFile() {
   return path.join(app.getPath('userData'), 'state.json')
 }
 
+function userConfigPath() {
+  return path.join(app.getPath('userData'), 'player.config.json')
+}
+
 function configPath() {
-  if (app.isPackaged) return path.join(app.getPath('userData'), 'player.config.json')
+  if (app.isPackaged) return userConfigPath()
   return path.join(app.getAppPath(), 'player.config.json')
 }
 
 function ensureDirs() {
   fs.mkdirSync(cacheDir(), { recursive: true })
+}
+
+function defaultConfig() {
+  return { serverUrl: 'http://127.0.0.1:8000', autoStart: false }
+}
+
+function ensureRuntimeConfig() {
+  if (!app.isPackaged) return
+  const target = userConfigPath()
+  if (fs.existsSync(target)) return
+  let content = null
+  try {
+    const raw = fs.readFileSync(path.join(app.getAppPath(), 'player.config.json'), 'utf-8')
+    JSON.parse(raw)
+    content = raw
+  } catch {}
+  if (!content) content = JSON.stringify(defaultConfig(), null, 2)
+  try {
+    fs.mkdirSync(app.getPath('userData'), { recursive: true })
+    fs.writeFileSync(target, content)
+    console.log('[main] runtime config initialized:', target)
+  } catch (err) {
+    console.log('[main] ensureRuntimeConfig error:', err)
+  }
 }
 
 function readConfig() {
@@ -65,7 +93,7 @@ function readConfig() {
       return JSON.parse(fs.readFileSync(p, 'utf-8'))
     } catch {}
   }
-  return { serverUrl: 'http://127.0.0.1:8000', autoStart: false }
+  return defaultConfig()
 }
 
 function lookupMediaPath(hash) {
@@ -105,6 +133,8 @@ function getLocalIp() {
 
 function registerIpc() {
   ipcMain.handle('config:get', () => readConfig())
+
+  ipcMain.handle('config:path', () => configPath())
 
   ipcMain.handle('ip:get', () => getLocalIp())
 
@@ -249,6 +279,7 @@ if (!gotLock) {
   })
 
   app.whenReady().then(() => {
+    ensureRuntimeConfig()
     registerIpc()
     registerMediaProtocol()
     createWindow()

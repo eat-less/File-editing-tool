@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('playerAPI', {
   getConfig: () => ipcRenderer.invoke('config:get'),
+  getConfigPath: () => ipcRenderer.invoke('config:path'),
   getLocalIp: () => ipcRenderer.invoke('ip:get'),
   cacheExists: (hash) => ipcRenderer.invoke('cache:exists', hash),
   cacheWrite: (payload) => ipcRenderer.invoke('cache:write', payload),

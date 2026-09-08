@@ -23,7 +23,8 @@ function onClick(e: any) {
 let pressTime = 0
 function onMouseDown() { pressTime = Date.now() }
 function onDragStart(e: any) {
-  if (!props.isSelected && Date.now() - pressTime < 250) {
+  // 单击(短按)仅用于选中元素,不应触发拖动;只有按住足够久后才允许移动
+  if (Date.now() - pressTime < 250) {
     e.target.stopDrag()
   }
 }
@@ -125,10 +126,11 @@ const textConfig = computed(() => ({
 
 function onDragEnd(e: any) {
   const node = e.target
-  editorStore.updateElement(props.element.id, {
-    x: Math.round(node.x()),
-    y: Math.round(node.y())
-  })
+  const x = Math.round(node.x())
+  const y = Math.round(node.y())
+  // 未发生实际位移时不写回数据,避免点击选中被误判为拖动而产生无效记录
+  if (x === Math.round(props.element.x || 0) && y === Math.round(props.element.y || 0)) return
+  editorStore.updateElement(props.element.id, { x, y })
 }
 
 function onTransformEnd(e: any) {

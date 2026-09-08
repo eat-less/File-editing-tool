@@ -29,10 +29,12 @@
       </el-table-column>
       <el-table-column prop="log_type" label="类型" width="100">
         <template #default="{ row }">
-          <el-tag :type="typeColor(row.log_type)">{{ row.log_type }}</el-tag>
+          <el-tag :type="typeColor(row.log_type)">{{ typeText(row.log_type) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="module" label="模块" width="100" />
+      <el-table-column label="模块" width="100">
+        <template #default="{ row }">{{ moduleText(row.module) }}</template>
+      </el-table-column>
       <el-table-column prop="message" label="摘要" min-width="250" />
       <el-table-column prop="duration_ms" label="耗时" width="80">
         <template #default="{ row }">{{ row.duration_ms ? row.duration_ms + 'ms' : '-' }}</template>
@@ -55,8 +57,8 @@
 
     <el-dialog v-model="detailVisible" title="日志详情" width="600px">
       <el-descriptions v-if="currentDetail" :column="2" border>
-        <el-descriptions-item label="类型">{{ currentDetail.log_type }}</el-descriptions-item>
-        <el-descriptions-item label="模块">{{ currentDetail.module }}</el-descriptions-item>
+        <el-descriptions-item label="类型">{{ typeText(currentDetail.log_type) }}</el-descriptions-item>
+        <el-descriptions-item label="模块">{{ moduleText(currentDetail.module) }}</el-descriptions-item>
         <el-descriptions-item label="消息" :span="2">{{ currentDetail.message }}</el-descriptions-item>
         <el-descriptions-item label="耗时">{{ currentDetail.duration_ms ? currentDetail.duration_ms + 'ms' : '-' }}</el-descriptions-item>
         <el-descriptions-item label="IP">{{ currentDetail.ip_address || '-' }}</el-descriptions-item>
@@ -94,6 +96,16 @@ function pageChange(p: number) { filters.page = p; fetchData() }
 function typeColor(t: string) {
   const map: Record<string, string> = { info: '', warning: 'warning', error: 'danger', success: 'success', operation_failed: 'danger' }
   return map[t] || ''
+}
+
+function typeText(t: string) {
+  const map: Record<string, string> = { info: '信息', warning: '警告', error: '错误', success: '成功', operation_failed: '操作失败' }
+  return map[t] || t
+}
+
+function moduleText(m: string) {
+  const map: Record<string, string> = { auth: '认证', exhibit: '展项', editor: '编辑器', distribution: '分发', asset: '素材', device: '设备', system: '系统', player: '播放器' }
+  return map[m] || m || '-'
 }
 
 function showDetail(row: any) { currentDetail.value = row; detailVisible.value = true }

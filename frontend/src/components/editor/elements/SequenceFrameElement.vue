@@ -11,6 +11,8 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useEditorStore } from '@/stores/editor'
+import { normalizeSegments, hasSegmentMove, segmentsTotalDuration, evaluate } from '@/render-engine/seqChoreography'
+import type { NormalizedSegment } from '@/render-engine/seqChoreography'
 import type { ElementItem, LayerItem } from '@/types'
 
 const props = defineProps<{ element: ElementItem; layer: LayerItem; isSelected: boolean }>()
@@ -27,6 +29,19 @@ let currentIdx = 0
 let direction = 1
 let currentLoop = 0
 const currentSeqIdx = ref(0)
+
+// ---- 段位移预览:编辑画布上跟随播放器一致的段编排移动 ----
+let segsCache: NormalizedSegment[] = []
+let movePreviewOn = false
+let choreoRAF: number | null = null
+let choreoStart = 0
+let choreoTotal = 0
+let lastAppliedSrc = ''
+let lastAppliedContentX: number | null = null
+let pendingFrameSrc = ''
+let winUpHandler: ((e: MouseEvent) => void) | null = null
+const seqFrameCache = new Map<string, HTMLImageElement>()
+const seqLoading = new Set<string>()
 
 const allSeqSources = computed(() => {
   const arr = props.element.seqSources
@@ -122,9 +137,17 @@ function onClick(e: any) {
 }
 
 let pressTime = 0
-function onMouseDown() { pressTime = Date.now() }
+function onMouseDown() {
+  pressTime = Date.now()
+  // 位移预览中的序列帧:按下时先固定回基准点,避免拖拽/选中的坐标与动画互相干扰
+  if (movePreviewOn && !capForMe.value) {
+    snapNodeToBase()
+    pauseChoreo()
+  }
+}
 function onDragStart(e: any) {
-  if (!props.isSelected && Date.now() - pressTime < 250) {
+  // 单击(短按)仅用于选中元素,不应触发拖动;只有按住足够久后才允许移动
+  if (Date.now() - pressTime < 250) {
     e.target.stopDrag()
   }
 }
@@ -191,8 +214,163 @@ function updateKonvaImage(img: HTMLImageElement) {
   }
 }
 
+// ---- 段位移预览的实现 ----
+function snapNodeToBase() {
+  const node = groupRef.value?.getNode()
+  if (!node) return
+  const bx = props.element.x || 0
+  const by = props.element.y || 0
+  if (node.x() !== bx || node.y() !== by) {
+    node.position({ x: bx, y: by })
+    node.getLayer()?.batchDraw()
+  }
+}
+
+function removeWinUp() {
+  if (winUpHandler) {
+    window.removeEventListener('mouseup', winUpHandler)
+    winUpHandler = null
+  }
+}
+
+function stopChoreo() {
+  if (choreoRAF !== null) {
+    cancelAnimationFrame(choreoRAF)
+    choreoRAF = null
+  }
+  removeWinUp()
+}
+
+function ensureSeqFrame(src: string) {
+  if (!src || src === lastAppliedSrc) return
+  const cached = seqFrameCache.get(src)
+  if (!cached) {
+    if (seqLoading.has(src)) return
+    seqLoading.add(src)
+    pendingFrameSrc = src
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.src = `/api/v1/assets/${src}/file`
+    img.onload = () => {
+      seqLoading.delete(src)
+      seqFrameCache.set(src, img)
+      if (src === pendingFrameSrc) ensureSeqFrame(src)
+    }
+    img.onerror = () => {
+      seqLoading.delete(src)
+      seqFrameCache.set(src, img)
+      if (src === pendingFrameSrc) ensureSeqFrame(src)
+    }
+    return
+  }
+  if (!cached.complete) return
+  if (!hasImage.value) hasImage.value = true
+  const node = konvaImageRef.value?.getNode()
+  if (!node) {
+    // image 节点尚未挂载(hasImage 刚置 true),下一帧再补一次
+    if (src !== lastAppliedSrc) requestAnimationFrame(() => { if (src !== lastAppliedSrc) ensureSeqFrame(src) })
+    return
+  }
+  node.image(cached)
+  lastAppliedSrc = src
+  node.getLayer()?.batchDraw()
+}
+
+function displayHomeFrame() {
+  stopChoreo()
+  snapNodeToBase()
+  lastAppliedSrc = ''
+  lastAppliedContentX = null
+  pendingFrameSrc = ''
+  const st0 = evaluate(segsCache, 0, { startX: props.element.x || 0, startY: props.element.y || 0, wholeLoop: true })
+  currentSeqIdx.value = st0.segIndex
+  if (st0.src) ensureSeqFrame(st0.src)
+  const seg = segsCache[st0.segIndex]
+  if (seg) {
+    const cx = seg.contentX ?? 0
+    const imgNode = konvaImageRef.value?.getNode()
+    if (imgNode) {
+      imgNode.x(cx)
+      lastAppliedContentX = cx
+    }
+  }
+}
+
+function startMoveChoreo() {
+  stopChoreo()
+  if (!movePreviewOn) return
+  snapNodeToBase()
+  lastAppliedSrc = ''
+  lastAppliedContentX = null
+  pendingFrameSrc = ''
+  choreoTotal = segmentsTotalDuration(segsCache)
+  choreoStart = performance.now()
+  const st0 = evaluate(segsCache, 0, { startX: props.element.x || 0, startY: props.element.y || 0, wholeLoop: true })
+  if (st0.src) ensureSeqFrame(st0.src)
+
+  const loop = () => {
+    const node = groupRef.value?.getNode()
+    if (!node) {
+      choreoRAF = requestAnimationFrame(loop)
+      return
+    }
+    const elapsed = (performance.now() - choreoStart) / 1000
+    const t = Number.isFinite(choreoTotal) && choreoTotal > 0 ? elapsed % choreoTotal : elapsed
+    const st = evaluate(segsCache, t, { startX: props.element.x || 0, startY: props.element.y || 0, wholeLoop: true })
+    if (st.src) {
+      pendingFrameSrc = st.src
+      ensureSeqFrame(st.src)
+    }
+    if (!props.isSelected && !node.isDragging()) {
+      const changed = st.x !== node.x() || st.y !== node.y()
+      const segChanged = st.segIndex !== currentSeqIdx.value
+      if (segChanged) currentSeqIdx.value = st.segIndex
+      if (changed) node.position({ x: st.x, y: st.y })
+      const seg = segsCache[st.segIndex]
+      if (seg) {
+        const cx = seg.contentX ?? 0
+        const imgNode = konvaImageRef.value?.getNode()
+        if (imgNode && (lastAppliedContentX === null || Math.abs(imgNode.x() - cx) > 0.05)) {
+          imgNode.x(cx)
+          lastAppliedContentX = cx
+        }
+      }
+      if (changed || segChanged) node.getLayer()?.batchDraw()
+    }
+    choreoRAF = requestAnimationFrame(loop)
+  }
+  choreoRAF = requestAnimationFrame(loop)
+}
+
+function pauseChoreo() {
+  if (choreoRAF !== null) {
+    cancelAnimationFrame(choreoRAF)
+    choreoRAF = null
+  }
+  if (!winUpHandler) {
+    winUpHandler = () => {
+      removeWinUp()
+      // 若此次按下并未选中该元素(点击空白/拖动后),松开后从基准点重新开始位移预览
+      setTimeout(() => {
+        if (movePreviewOn && !capForMe.value && !props.isSelected) startMoveChoreo()
+      }, 0)
+    }
+    window.addEventListener('mouseup', winUpHandler)
+  }
+}
+
 function loadFrames() {
   stopAll()
+  segsCache = normalizeSegments(props.element as any)
+  movePreviewOn = hasSegmentMove(segsCache) && props.element.autoplay !== false
+  if (movePreviewOn && !capForMe.value) {
+    if (props.isSelected) {
+      displayHomeFrame()
+      return
+    }
+    startMoveChoreo()
+    return
+  }
   const src = currentSource.value
   if (!src?.frames?.length) {
     frameImages.value = []
@@ -310,6 +488,7 @@ function stopAnimation() {
 function stopAll() {
   stopAnimation()
   if (seqTimer) { clearTimeout(seqTimer); seqTimer = null }
+  stopChoreo()
 }
 
 watch(() => [props.element.source?.frames, props.element.seqSources, props.element.autoplay], () => {
@@ -318,6 +497,16 @@ watch(() => [props.element.source?.frames, props.element.seqSources, props.eleme
     : 0
   loadFrames()
 }, { immediate: true, deep: true })
+
+// 选中时冻结在基准点便于编辑,取消选中后恢复位移预览
+watch(() => props.isSelected, (sel) => {
+  if (sel) {
+    stopChoreo()
+    snapNodeToBase()
+  } else if (movePreviewOn && !capForMe.value) {
+    startMoveChoreo()
+  }
+})
 
 onBeforeUnmount(() => {
   stopAll()

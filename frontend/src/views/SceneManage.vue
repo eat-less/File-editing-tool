@@ -18,7 +18,7 @@
         <el-table-column prop="device_type" label="类型" width="120" />
         <el-table-column prop="ip_address" label="IP地址" width="150" />
         <el-table-column prop="status" label="状态" width="100">
-          <template #default="{ row }"><el-tag :type="row.status === 'online' ? 'success' : 'info'">{{ row.status }}</el-tag></template>
+          <template #default="{ row }"><el-tag :type="row.status === 'online' ? 'success' : 'info'">{{ row.status === 'online' ? '在线' : '离线' }}</el-tag></template>
         </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
@@ -52,7 +52,7 @@
           <el-table-column prop="device_type" label="类型" width="120" />
           <el-table-column prop="ip_address" label="IP地址" width="150" />
           <el-table-column prop="status" label="状态" width="100">
-            <template #default="{ row }"><el-tag :type="row.status === 'online' ? 'success' : 'info'">{{ row.status }}</el-tag></template>
+            <template #default="{ row }"><el-tag :type="row.status === 'online' ? 'success' : 'info'">{{ row.status === 'online' ? '在线' : '离线' }}</el-tag></template>
           </el-table-column>
           <el-table-column label="操作" width="100">
             <template #default="{ row }">
