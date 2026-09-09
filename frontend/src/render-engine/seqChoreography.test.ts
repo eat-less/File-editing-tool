@@ -75,6 +75,29 @@ describe('normalizeSegments contentX', () => {
   })
 })
 
+describe('normalizeSegments moveDurationSec', () => {
+  it('move.duration>0 有限数透传，否则 null', () => {
+    const segs = normalizeSegments({
+      seqSources: [
+        { frames: f(4), move: { enabled: true, to: { x: 10, y: 0 }, duration: 1.5 } },
+        { frames: f(4), move: { enabled: true, to: { x: 10, y: 0 }, duration: null } },
+        { frames: f(4), move: { enabled: true, to: { x: 10, y: 0 } } },
+        { frames: f(4) },
+      ],
+    })
+    expect(segs[0].moveDurationSec).toBe(1.5)
+    expect(segs[1].moveDurationSec).toBeNull()
+    expect(segs[2].moveDurationSec).toBeNull()
+    expect(segs[3].moveDurationSec).toBeNull()
+  })
+  it('move.enabled=false 时即使给了 duration 也不生效', () => {
+    const segs = normalizeSegments({
+      seqSources: [{ frames: f(4), move: { enabled: false, to: { x: 10, y: 0 }, duration: 2 } }],
+    })
+    expect(segs[0].moveDurationSec).toBeNull()
+  })
+})
+
 describe('duration', () => {
   it('segmentDuration = 帧数/fps × loopCount；loopCount=-1 为 Infinity', () => {
     const s = { name: '', frames: f(24), fps: 24, loopCount: 3, direction: 'forward' as const, flipX: false, moveTo: null }
@@ -173,5 +196,29 @@ describe('evaluate', () => {
     expect(s.x).toBeCloseTo(40)       // 1/3 总时长
     const tail = evaluate(segs, 1.2 - 1e-6, { startX: 0, startY: 0, wholeLoop: false })
     expect(tail.x).toBeCloseTo(120)
+  })
+
+  it('移动时长短于帧时长：提前到位后原地播帧到段尾', () => {
+    const mkD = (dur: number) =>
+      ({ name: '', frames: f(4), fps: 10, loopCount: 1, direction: 'forward' as const, flipX: false, moveTo: { x: 100, y: 0 }, moveDurationSec: dur })
+    const segs = [mkD(0.2)]           // 帧自然时长 0.4s
+    const mid = evaluate(segs, 0.3, { startX: 0, startY: 0, wholeLoop: false })
+    expect(mid.segIndex).toBe(0)      // 段还没结束
+    expect(mid.x).toBeCloseTo(100)    // 已到位
+    expect(mid.src).not.toBeNull()    // 帧继续播
+    const end = evaluate(segs, 0.4, { startX: 0, startY: 0, wholeLoop: false })
+    expect(end.finished).toBe(true)
+    expect(end.x).toBeCloseTo(100)
+  })
+
+  it('移动时长超过帧时长被钳制为整段移动（不越界）', () => {
+    const mkD = (dur: number) =>
+      ({ name: '', frames: f(4), fps: 10, loopCount: 1, direction: 'forward' as const, flipX: false, moveTo: { x: 100, y: 0 }, moveDurationSec: dur })
+    const segs = [mkD(5)]             // 帧自然时长只有 0.4s
+    const half = evaluate(segs, 0.2, { startX: 0, startY: 0, wholeLoop: false })
+    expect(half.x).toBeCloseTo(50)
+    const end = evaluate(segs, 0.4, { startX: 0, startY: 0, wholeLoop: false })
+    expect(end.finished).toBe(true)
+    expect(end.x).toBeCloseTo(100)
   })
 })

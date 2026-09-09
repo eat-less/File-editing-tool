@@ -10,7 +10,7 @@ export interface RawSegment {
   direction?: string
   flipX?: boolean
   contentX?: number
-  move?: { enabled?: boolean; to?: { x: number; y: number } }
+  move?: { enabled?: boolean; to?: { x: number; y: number }; duration?: number | null }
 }
 
 export interface SeqElementLike {
@@ -34,6 +34,7 @@ export interface NormalizedSegment {
   flipX: boolean
   contentX?: number       // 帧内水平偏移(px)，绘制帧时 translateX；normalize 后为数字，缺省 0
   moveTo: { x: number; y: number } | null
+  moveDurationSec?: number | null   // 独立移动时长(秒)；null=与帧自然时长相同
 }
 
 export interface ChoreoState {
@@ -77,7 +78,11 @@ export function normalizeSegments(el: SeqElementLike): NormalizedSegment[] {
       m?.enabled && m.to && typeof m.to.x === 'number' && typeof m.to.y === 'number'
         ? { x: m.to.x, y: m.to.y }
         : null
-    return { name: s.name || `段${i + 1}`, frames, fps, loopCount, direction: toDir(s.direction), flipX: !!s.flipX, contentX: typeof s.contentX === 'number' ? s.contentX : 0, moveTo }
+    const moveDurationSec =
+      m?.enabled && m.duration != null && typeof m.duration === 'number' && m.duration > 0 && Number.isFinite(m.duration)
+        ? m.duration
+        : null
+    return { name: s.name || `段${i + 1}`, frames, fps, loopCount, direction: toDir(s.direction), flipX: !!s.flipX, contentX: typeof s.contentX === 'number' ? s.contentX : 0, moveTo, moveDurationSec }
   })
 }
 
@@ -165,7 +170,12 @@ export function evaluate(segs: NormalizedSegment[], elapsedSec: number, opts: Ev
     let y = curY
     if (s.moveTo) {
       const n = s.frames.length
-      const denom = s.loopCount === -1 ? (n > 0 ? n / s.fps : 0) : segmentDuration(s)
+      const natural = segmentDuration(s)
+      // 独立移动时长(秒)：空=与帧自然时长相同；超过自然时长则钳制为整段移动
+      const denom =
+        s.moveDurationSec != null && Number.isFinite(s.moveDurationSec)
+          ? (Number.isFinite(natural) ? Math.min(s.moveDurationSec, natural) : s.moveDurationSec)
+          : (s.loopCount === -1 && natural === Infinity && n > 0 ? n / s.fps : natural)
       const p = denom > 0 ? Math.min(local / denom, 1) : 1
       x = curX + (s.moveTo.x - curX) * p
       y = curY + (s.moveTo.y - curY) * p
