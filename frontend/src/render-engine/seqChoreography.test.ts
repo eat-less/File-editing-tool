@@ -211,14 +211,29 @@ describe('evaluate', () => {
     expect(end.x).toBeCloseTo(100)
   })
 
-  it('移动时长超过帧时长被钳制为整段移动（不越界）', () => {
+  it('移动时长超过帧时长：帧播完冻结末帧，继续移动到移动结束才进下一段', () => {
     const mkD = (dur: number) =>
       ({ name: '', frames: f(4), fps: 10, loopCount: 1, direction: 'forward' as const, flipX: false, moveTo: { x: 100, y: 0 }, moveDurationSec: dur })
-    const segs = [mkD(5)]             // 帧自然时长只有 0.4s
-    const half = evaluate(segs, 0.2, { startX: 0, startY: 0, wholeLoop: false })
-    expect(half.x).toBeCloseTo(50)
-    const end = evaluate(segs, 0.4, { startX: 0, startY: 0, wholeLoop: false })
+    const segs = [mkD(1.0)]           // 帧自然时长只有 0.4s
+    const atDot5 = evaluate(segs, 0.5, { startX: 0, startY: 0, wholeLoop: false })
+    expect(atDot5.segIndex).toBe(0)   // 段未结束(被延长)
+    expect(atDot5.src).toBe('f3')     // 冻结在末帧
+    expect(atDot5.x).toBeCloseTo(50)  // 仍在移动(0.5/1.0)
+    const end = evaluate(segs, 1.0, { startX: 0, startY: 0, wholeLoop: false })
     expect(end.finished).toBe(true)
     expect(end.x).toBeCloseTo(100)
+  })
+
+  it('移动时长长的段，其总时长=max(帧时长,移动时长) 且后续段从其结束后开始', () => {
+    const mkD = (dur: number) =>
+      ({ name: '', frames: f(4), fps: 10, loopCount: 1, direction: 'forward' as const, flipX: false, moveTo: { x: 100, y: 0 }, moveDurationSec: dur })
+    const second = { name: '', frames: f(4), fps: 10, loopCount: 1, direction: 'forward' as const, flipX: false, moveTo: { x: 200, y: 0 }, moveDurationSec: null }
+    const segs = [mkD(1.0), second]   // spans: 1.0 + 0.4 = 1.4
+    const atStart2 = evaluate(segs, 1.0, { startX: 0, startY: 0, wholeLoop: false })
+    expect(atStart2.segIndex).toBe(1)
+    expect(atStart2.x).toBeCloseTo(100)
+    const fin = evaluate(segs, 1.4, { startX: 0, startY: 0, wholeLoop: false })
+    expect(fin.finished).toBe(true)
+    expect(fin.x).toBeCloseTo(200)
   })
 })

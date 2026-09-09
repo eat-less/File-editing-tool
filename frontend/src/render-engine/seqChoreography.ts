@@ -93,10 +93,19 @@ export function segmentDuration(seg: NormalizedSegment): number {
   return (n / seg.fps) * seg.loopCount
 }
 
+// 段实际占用时长：默认=帧自然时长；若为移动段且给了更长的独立移动时长，则延长到移动结束
+export function segmentSpan(seg: NormalizedSegment): number {
+  const natural = segmentDuration(seg)
+  if (seg.moveTo && seg.moveDurationSec != null) {
+    return Math.max(natural, seg.moveDurationSec)
+  }
+  return natural
+}
+
 export function segmentsTotalDuration(segs: NormalizedSegment[]): number {
   let sum = 0
   for (const s of segs) {
-    const d = segmentDuration(s)
+    const d = segmentSpan(s)
     if (!Number.isFinite(d)) return Infinity
     sum += d
   }
@@ -138,12 +147,12 @@ export function evaluate(segs: NormalizedSegment[], elapsedSec: number, opts: Ev
   }
   if (t < 0) t = 0
 
-  // 找到 t 落在哪一段
+  // 找到 t 落在哪一段（段边界按 segmentSpan：移动时长长于帧时长时被延长）
   let cursor = 0
   let segIndex = 0
   let local = 0
   for (let i = 0; i < segs.length; i++) {
-    const d = segmentDuration(segs[i])
+    const d = segmentSpan(segs[i])
     if (t < cursor + d) {
       segIndex = i
       local = t - cursor
@@ -165,18 +174,24 @@ export function evaluate(segs: NormalizedSegment[], elapsedSec: number, opts: Ev
       continue
     }
     // 激活段
-    const frameIndex = resolveFrameIndex(s, Math.max(local, 0))
+    const natural = segmentDuration(s)
+    const local0 = Math.max(local, 0)
+    let frameIndex: number
+    if (Number.isFinite(natural) && local0 >= natural) {
+      // 移动时长超过帧时长：帧播完后冻结在自然时长结束那一帧
+      frameIndex = resolveFrameIndex(s, Math.max(natural - 1e-9, 0))
+    } else {
+      frameIndex = resolveFrameIndex(s, local0)
+    }
     let x = curX
     let y = curY
     if (s.moveTo) {
       const n = s.frames.length
-      const natural = segmentDuration(s)
-      // 独立移动时长(秒)：空=与帧自然时长相同；超过自然时长则钳制为整段移动
-      const denom =
-        s.moveDurationSec != null && Number.isFinite(s.moveDurationSec)
-          ? (Number.isFinite(natural) ? Math.min(s.moveDurationSec, natural) : s.moveDurationSec)
-          : (s.loopCount === -1 && natural === Infinity && n > 0 ? n / s.fps : natural)
-      const p = denom > 0 ? Math.min(local / denom, 1) : 1
+      // 独立移动时长(秒)：空=与帧自然时长相同；loop=-1 时无帧时长则用单趟时长
+      let denom = natural
+      if (s.moveDurationSec != null) denom = s.moveDurationSec
+      else if (natural === Infinity) denom = n > 0 ? n / s.fps : 0
+      const p = denom > 0 ? Math.min(local0 / denom, 1) : 1
       x = curX + (s.moveTo.x - curX) * p
       y = curY + (s.moveTo.y - curY) * p
     }

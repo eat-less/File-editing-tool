@@ -348,10 +348,10 @@
                   <div style="display:flex;align-items:center;gap:4px;margin-top:4px">
                     <span style="font-size:11px;color:#909399">移动时长(s)</span>
                     <el-input-number :model-value="moveDurModel(s)"
-                                     :min="0.01" :max="moveDurMax(s)" :step="0.1" :precision="2" size="small"
+                                     :min="0.01" :step="0.1" :precision="2" size="small"
                                      controls-position="right" style="width:100%" placeholder="=帧时长"
                                      @change="(v: number | undefined | null) => updateSeqMoveDur(idx, v == null ? null : v)" />
-                    <span style="font-size:10px;color:#b1b3b8">空=与帧时长相同</span>
+                    <span style="font-size:10px;color:#b1b3b8">空=帧时长；大于帧时长时帧播完冻结末帧继续移动</span>
                   </div>
                   <div style="margin-top:4px;text-align:right">
                     <el-button size="small" @click="applyCurrentPosToMove(idx)">记录当前位置</el-button>
@@ -557,6 +557,17 @@ function segLoop(s: any): number {
   if (typeof s?.loopCount === 'number' && s.loopCount !== 0) return s.loopCount < 0 ? -1 : Math.max(1, Math.floor(s.loopCount))
   return 1
 }
+function segEffDur(s: any): number {
+  const frames = s?.frames?.length || s.frameCount || 0
+  const loop = segLoop(s)
+  const natural = loop === -1 ? Infinity : (frames / segFps(s)) * loop
+  if (s?.move?.enabled && s.move?.to) {
+    const d = typeof s.move.duration === 'number' && s.move.duration > 0 ? s.move.duration : null
+    if (d != null) return Number.isFinite(natural) ? Math.max(natural, d) : Infinity
+  }
+  return natural
+}
+
 function segDurationLabel(s: any): string {
   const frames = s?.frames?.length || s.frameCount || 0
   const fps = segFps(s)
@@ -565,8 +576,9 @@ function segDurationLabel(s: any): string {
     ? ` 移动→(${Math.round(s.move.to?.x ?? 0)}, ${Math.round(s.move.to?.y ?? 0)})`
     : ' 静止'
   if (loop === -1) return `${frames}帧@${fps}fps ∞ ${mv}`
-  const dur = (frames / fps) * loop
-  return `${frames}帧@${fps}fps ×${loop} · ${dur.toFixed(1)}s${mv}`
+  const dur = segEffDur(s)
+  const suffix = Number.isFinite(dur) ? ` · ${dur.toFixed(1)}s` : ''
+  return `${frames}帧@${fps}fps ×${loop}${suffix}${mv}`
 }
 
 const hasSeqMove = computed(() => seqSources.value.some((s: any) => !!s?.move?.enabled))
@@ -574,9 +586,9 @@ const hasSeqMove = computed(() => seqSources.value.some((s: any) => !!s?.move?.e
 const totalSeqDurationLabel = computed(() => {
   let total = 0
   for (const s of seqSources.value) {
-    const loop = segLoop(s)
-    if (loop === -1) return '∞'
-    total += ((s?.frames?.length || s.frameCount || 0) / segFps(s)) * loop
+    const dur = segEffDur(s)
+    if (!Number.isFinite(dur)) return '∞'
+    total += dur
   }
   return total.toFixed(1) + 's'
 })
@@ -727,20 +739,14 @@ function segNaturalFrameDur(s: any): number {
 function segMoveDurEff(s: any): number | null {
   if (!s?.move?.enabled) return null
   const custom = typeof s.move.duration === 'number' && s.move.duration > 0 ? s.move.duration : null
+  if (custom != null) return custom
   const natural = segNaturalFrameDur(s)
-  if (!Number.isFinite(natural)) return custom
-  if (custom == null) return natural
-  return Math.min(custom, natural)
+  return Number.isFinite(natural) ? natural : null
 }
 
 function moveDurModel(s: any): number | undefined {
   const d = s?.move?.duration
   return typeof d === 'number' && d > 0 ? d : undefined
-}
-
-function moveDurMax(s: any): number | undefined {
-  const n = segNaturalFrameDur(s)
-  return Number.isFinite(n) ? n : undefined
 }
 
 function updateSeqMoveDur(idx: number, value: number | null) {
@@ -749,8 +755,7 @@ function updateSeqMoveDur(idx: number, value: number | null) {
   const move = sources[idx].move || { enabled: true, to: { x: 0, y: 0 } }
   let dur: number | null = null
   if (value != null && typeof value === 'number' && value > 0 && Number.isFinite(value)) {
-    const natural = segNaturalFrameDur(sources[idx])
-    dur = Math.round((Number.isFinite(natural) ? Math.min(value, natural) : value) * 100) / 100
+    dur = Math.round(value * 100) / 100
   }
   sources[idx] = {
     ...sources[idx],
@@ -791,9 +796,7 @@ function alignStepTo(idx: number, refIdx: number) {
   const cur = segMoveReadout(seqSources.value[idx], idx)
   const ref = segMoveReadout(seqSources.value[refIdx], refIdx)
   if (!cur || !ref || ref.speed <= 0) return
-  const targetDur = cur.dist / ref.speed
-  const naturalCur = segNaturalFrameDur(seqSources.value[idx])
-  updateSeqMoveDur(idx, Number.isFinite(naturalCur) && targetDur > naturalCur ? null : targetDur)
+  updateSeqMoveDur(idx, cur.dist / ref.speed)
 }
 
 watch(() => `${editorStore.selectedLayerIds.join(',')}|${findSelectedElement()?.id ?? ''}`, () => {
