@@ -140,7 +140,7 @@ export const useEditorStore = defineStore('editor', () => {
     layer.element.seqSources = [{
       type: 'folder', frames, name: seqData.folderName || '序列帧', frameCount: frames.length,
       loopCount: 1, fps: undefined, direction: 'forward', flipX: false, contentX: 0,
-      move: { enabled: false, to: { x, y } },
+      move: { enabled: false, to: { x, y }, duration: null },
     }]
     currentPage.value.layers.push(layer)
     selectedLayerIds.value = [layer.element.id]

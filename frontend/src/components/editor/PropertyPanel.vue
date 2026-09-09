@@ -345,12 +345,21 @@
                                      controls-position="right" style="width:100%"
                                      @change="(v: number | undefined) => updateSeqMoveTo(idx, 'y', v)" />
                   </div>
+                  <div style="display:flex;align-items:center;gap:4px;margin-top:4px">
+                    <span style="font-size:11px;color:#909399">移动时长(s)</span>
+                    <el-input-number :model-value="moveDurModel(s)"
+                                     :min="0.01" :max="moveDurMax(s)" :step="0.1" :precision="2" size="small"
+                                     controls-position="right" style="width:100%" placeholder="=帧时长"
+                                     @change="(v: number | undefined | null) => updateSeqMoveDur(idx, v == null ? null : v)" />
+                    <span style="font-size:10px;color:#b1b3b8">空=与帧时长相同</span>
+                  </div>
                   <div style="margin-top:4px;text-align:right">
                     <el-button size="small" @click="applyCurrentPosToMove(idx)">记录当前位置</el-button>
                   </div>
                   <template v-if="segMoveReadout(s, idx)">
                     <div style="margin-top:2px;font-size:10px;color:#606266">
-                      单循环位移 {{ segMoveReadout(s, idx)!.step.toFixed(1) }}px · 平移速度 {{ segMoveReadout(s, idx)!.speed.toFixed(1) }}px/s
+                      移动时长 {{ segMoveReadout(s, idx)!.dur.toFixed(2) }}s · 平移速度 {{ segMoveReadout(s, idx)!.speed.toFixed(1) }}px/s
+                      <template v-if="segMoveReadout(s, idx)!.step != null">（单循环位移 {{ segMoveReadout(s, idx)!.step!.toFixed(1) }}px）</template>
                     </div>
                     <div v-if="movingRefIndices(idx).length"
                          style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">
@@ -619,7 +628,14 @@ function setSeqMoveEnabled(idx: number, enabled: boolean) {
   const sources = [...seqSources.value]
   if (!sources[idx]) return
   const cur = sources[idx].move || { enabled: false, to: { x: el.value.x || 0, y: el.value.y || 0 } }
-  sources[idx] = { ...sources[idx], move: { enabled, to: { x: cur.to?.x ?? 0, y: cur.to?.y ?? 0 } } }
+  sources[idx] = {
+    ...sources[idx],
+    move: {
+      enabled,
+      to: { x: cur.to?.x ?? 0, y: cur.to?.y ?? 0 },
+      duration: cur.duration != null ? cur.duration : null,
+    },
+  }
   commitSeqSources(sources)
 }
 
@@ -700,18 +716,66 @@ function moveFoldStart(idx: number): { x: number; y: number } {
   return { x, y }
 }
 
-function segMoveReadout(s: any, idx: number): { dist: number; loops: number; step: number; speed: number } | null {
-  if (!s?.move?.enabled || !s.move?.to) return null
+function segNaturalFrameDur(s: any): number {
+  const frames = s?.frames?.length || s.frameCount || 0
+  if (!frames) return 0
   const loops = segLoop(s)
-  if (loops === -1) return null
+  if (loops === -1) return Infinity
+  return (frames / segFps(s)) * loops
+}
+
+function segMoveDurEff(s: any): number | null {
+  if (!s?.move?.enabled) return null
+  const custom = typeof s.move.duration === 'number' && s.move.duration > 0 ? s.move.duration : null
+  const natural = segNaturalFrameDur(s)
+  if (!Number.isFinite(natural)) return custom
+  if (custom == null) return natural
+  return Math.min(custom, natural)
+}
+
+function moveDurModel(s: any): number | undefined {
+  const d = s?.move?.duration
+  return typeof d === 'number' && d > 0 ? d : undefined
+}
+
+function moveDurMax(s: any): number | undefined {
+  const n = segNaturalFrameDur(s)
+  return Number.isFinite(n) ? n : undefined
+}
+
+function updateSeqMoveDur(idx: number, value: number | null) {
+  const sources = [...seqSources.value]
+  if (!sources[idx]) return
+  const move = sources[idx].move || { enabled: true, to: { x: 0, y: 0 } }
+  let dur: number | null = null
+  if (value != null && typeof value === 'number' && value > 0 && Number.isFinite(value)) {
+    const natural = segNaturalFrameDur(sources[idx])
+    dur = Math.round((Number.isFinite(natural) ? Math.min(value, natural) : value) * 100) / 100
+  }
+  sources[idx] = {
+    ...sources[idx],
+    move: { ...move, enabled: move.enabled !== false, to: { x: move.to?.x ?? 0, y: move.to?.y ?? 0 }, duration: dur },
+  }
+  commitSeqSources(sources)
+}
+
+function segMoveReadout(s: any, idx: number): { dist: number; loops: number; dur: number; step: number | null; speed: number } | null {
+  if (!s?.move?.enabled || !s.move?.to) return null
   const frames = s?.frames?.length || s.frameCount || 0
   if (!frames) return null
+  const loops = segLoop(s)
   const start = moveFoldStart(idx)
   const dist = Math.hypot((s.move.to.x ?? start.x) - start.x, (s.move.to.y ?? start.y) - start.y)
   if (dist <= 0) return null
-  const fps = segFps(s)
-  const dur = (frames / fps) * loops
-  return { dist, loops, step: dist / loops, speed: dur > 0 ? dist / dur : 0 }
+  const dur = segMoveDurEff(s)
+  if (dur == null) return null
+  return {
+    dist,
+    loops,
+    dur,
+    step: loops === -1 ? null : dist / loops,
+    speed: dur > 0 ? dist / dur : 0,
+  }
 }
 
 function movingRefIndices(idx: number): number[] {
@@ -726,9 +790,10 @@ function movingRefIndices(idx: number): number[] {
 function alignStepTo(idx: number, refIdx: number) {
   const cur = segMoveReadout(seqSources.value[idx], idx)
   const ref = segMoveReadout(seqSources.value[refIdx], refIdx)
-  if (!cur || !ref || ref.step <= 0) return
-  const loops = Math.max(1, Math.min(99, Math.round(cur.dist / ref.step)))
-  if (loops !== cur.loops) updateSeqProp(idx, 'loopCount', loops)
+  if (!cur || !ref || ref.speed <= 0) return
+  const targetDur = cur.dist / ref.speed
+  const naturalCur = segNaturalFrameDur(seqSources.value[idx])
+  updateSeqMoveDur(idx, Number.isFinite(naturalCur) && targetDur > naturalCur ? null : targetDur)
 }
 
 watch(() => `${editorStore.selectedLayerIds.join(',')}|${findSelectedElement()?.id ?? ''}`, () => {
