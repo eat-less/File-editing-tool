@@ -1,5 +1,6 @@
+import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select, update
 from app.config import settings
@@ -12,6 +13,10 @@ from app.services.control_service import dispatch_action
 from app.services.log_service import write_log
 
 router = APIRouter(tags=["WebSocket"])
+
+# 心跳每 30s 一次;超过该时长未收到心跳即判定离线
+OFFLINE_THRESHOLD_SECONDS = 75
+SWEEP_INTERVAL_SECONDS = 30
 
 
 async def _sync_device(db, device_code: str, online: bool, ip_address: str | None = None):
@@ -143,6 +148,53 @@ async def _on_device_disconnect(device_code: str):
     except Exception:
         pass
     await ws_manager.broadcast_to_controls({"type": "deviceStatus", "deviceCode": device_code, "online": False})
+
+
+async def reset_all_device_status():
+    """服务器启动时清理残留:将此前标记为在线的设备全部置为离线,等待设备重新连接后再上报在线。"""
+    try:
+        async with async_session_factory() as db:
+            result = await db.execute(
+                update(Device).where(Device.status == "online").values(status="offline", last_online=None)
+            )
+            await db.commit()
+            return result.rowcount or 0
+    except Exception:
+        return 0
+
+
+async def stale_online_sweeper():
+    """周期扫描:status=online 但超过心跳超时阈值未收到心跳的设备,判定为连接假死并置离线。"""
+    while True:
+        await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=OFFLINE_THRESHOLD_SECONDS)
+            async with async_session_factory() as db:
+                result = await db.execute(
+                    select(Device).where(
+                        Device.status == "online",
+                        Device.last_online.is_not(None),
+                        Device.last_online < cutoff,
+                    )
+                )
+                stale = list(result.scalars().all())
+                if not stale:
+                    continue
+                codes = [d.unique_code for d in stale]
+                for code in codes:
+                    ws_manager.disconnect_device(code)
+                await db.execute(
+                    update(Device)
+                    .where(Device.unique_code.in_(codes), Device.status == "online")
+                    .values(status="offline", last_online=None)
+                )
+                await db.commit()
+            for code in codes:
+                await ws_manager.broadcast_to_controls({"type": "deviceStatus", "deviceCode": code, "online": False})
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
 
 
 @router.websocket("/ws/control")

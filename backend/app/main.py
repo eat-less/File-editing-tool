@@ -1,3 +1,4 @@
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -5,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import init_db
 from app.api import auth, exhibit, project, editor, asset, distribution, ws, player, log as log_api
+from app.api.ws import reset_all_device_status, stale_online_sweeper
 from app.services.auth_service import get_user_by_username, create_user as create_user_svc
 from app.utils.minio_utils import ensure_bucket
 
@@ -38,7 +40,16 @@ async def lifespan(app: FastAPI):
     await init_db()
     await create_default_admin()
     await ensure_storage()
+    # 清理服务器重启前残留的“在线”状态
+    await reset_all_device_status()
+    # 后台周期扫描心跳超时设备,处理连接假死导致的在线残留
+    sweeper_task = asyncio.create_task(stale_online_sweeper())
     yield
+    sweeper_task.cancel()
+    try:
+        await sweeper_task
+    except (asyncio.CancelledError, Exception):
+        pass
 
 
 app = FastAPI(title="多媒体内容管理展示系统", version="3.0.0", lifespan=lifespan)

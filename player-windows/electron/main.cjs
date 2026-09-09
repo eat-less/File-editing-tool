@@ -96,6 +96,30 @@ function readConfig() {
   return defaultConfig()
 }
 
+function writeConfig(cfg) {
+  fs.mkdirSync(path.dirname(configPath()), { recursive: true })
+  fs.writeFileSync(configPath(), JSON.stringify(cfg, null, 2))
+}
+
+function applyAutoStart(openAtLogin) {
+  if (!app.isPackaged) return false
+  app.setLoginItemSettings({ openAtLogin: !!openAtLogin })
+  return !!openAtLogin
+}
+
+function getLocalIps() {
+  const out = []
+  const ifaces = os.networkInterfaces() || {}
+  for (const name of Object.keys(ifaces)) {
+    for (const info of ifaces[name] || []) {
+      if (info.family === 'IPv4' && !info.internal) {
+        out.push({ name, address: info.address })
+      }
+    }
+  }
+  return out
+}
+
 function lookupMediaPath(hash) {
   const bare = path.join(cacheDir(), hash)
   if (fs.existsSync(bare)) return bare
@@ -122,21 +146,33 @@ function registerMediaProtocol() {
 }
 
 function getLocalIp() {
-  const ifaces = os.networkInterfaces()
-  for (const name of Object.keys(ifaces)) {
-    for (const info of ifaces[name] || []) {
-      if (info.family === 'IPv4' && !info.internal) return info.address
-    }
-  }
-  return ''
+  const all = getLocalIps()
+  return all.length ? all[0].address : ''
 }
 
 function registerIpc() {
   ipcMain.handle('config:get', () => readConfig())
 
+  ipcMain.handle('config:set', (_e, patch) => {
+    try {
+      const merged = { ...defaultConfig(), ...readConfig(), ...(patch || {}) }
+      const cleaned = {}
+      for (const k of Object.keys(merged)) {
+        if (merged[k] !== undefined && merged[k] !== null && merged[k] !== '') cleaned[k] = merged[k]
+      }
+      writeConfig(cleaned)
+      if ('autoStart' in (patch || {})) applyAutoStart(cleaned.autoStart)
+      return { ok: true, config: cleaned }
+    } catch (err) {
+      return { ok: false, error: String(err) }
+    }
+  })
+
   ipcMain.handle('config:path', () => configPath())
 
   ipcMain.handle('ip:get', () => getLocalIp())
+
+  ipcMain.handle('ip:list', () => getLocalIps())
 
   ipcMain.handle('cache:exists', (_e, hash) => !!lookupMediaPath(hash))
 
@@ -283,10 +319,7 @@ if (!gotLock) {
     registerIpc()
     registerMediaProtocol()
     createWindow()
-    if (app.isPackaged) {
-      const cfg = readConfig()
-      app.setLoginItemSettings({ openAtLogin: !!cfg.autoStart })
-    }
+    applyAutoStart(!!readConfig().autoStart)
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
