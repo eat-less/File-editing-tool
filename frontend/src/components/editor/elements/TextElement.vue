@@ -10,6 +10,7 @@ import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import Konva from 'konva'
 import { useEditorStore } from '@/stores/editor'
 import { getTypewriterInterval, getEnterDuration } from '@/utils/appearEffect'
+import { konvaFontStyle, wrapTextToString, measureStyleFromElement, wrapWidthOf } from '@/utils/textWrap'
 import type { ElementItem, LayerItem } from '@/types'
 
 const props = defineProps<{ element: ElementItem; layer: LayerItem; isSelected: boolean }>()
@@ -57,6 +58,13 @@ const fullText = computed(() => {
   return typeof c === 'string' ? c : (c || '文字')
 })
 const displayText = computed(() => effect.value === 'typewriter' ? typedText.value : fullText.value)
+
+// 与播放器共用同一套换行算法，保留空格并保证两端一致
+const wrappedText = computed(() => wrapTextToString(
+  displayText.value,
+  wrapWidthOf(props.element),
+  measureStyleFromElement(props.element)
+))
 
 function stopType() {
   if (typeTimer) { clearInterval(typeTimer); typeTimer = null }
@@ -108,21 +116,39 @@ onBeforeUnmount(() => {
   if (enterTween) { enterTween.destroy(); enterTween = null }
 })
 
-const textConfig = computed(() => ({
-  text: displayText.value,
-  fontSize: props.element.fontSize || 32,
-  fontFamily: props.element.fontFamily || 'Microsoft YaHei',
-  fontStyle: props.element.fontStyle || 'normal',
-  fill: props.element.color || '#ffffff',
-  width: props.element.width || 500,
-  height: props.element.height || 100,
-  align: props.element.textAlign || 'center',
-  verticalAlign: props.element.verticalAlign || 'middle',
-  wrap: 'none',
-  ellipsis: true,
-  stroke: props.isSelected ? '#409EFF' : undefined,
-  strokeWidth: props.isSelected ? 1 : 0
-}))
+const textConfig = computed(() => {
+  const ts = props.element.textStroke
+  const hasOutline = ts && Number(ts.width) > 0 && ts.color
+  const td = props.element.textShadow
+  const hasShadow = td && Number(td.blur) > 0
+  const cfg: any = {
+    text: wrappedText.value,
+    fontSize: props.element.fontSize || 32,
+    fontFamily: props.element.fontFamily || 'Microsoft YaHei',
+    fontStyle: konvaFontStyle(props.element),
+    fill: props.element.color || '#ffffff',
+    width: props.element.width || 500,
+    height: props.element.height || 100,
+    align: props.element.textAlign || 'center',
+    verticalAlign: props.element.verticalAlign || 'middle',
+    lineHeight: Number(props.element.lineHeight) || 1.5,
+    letterSpacing: Number(props.element.letterSpacing) || 0,
+    padding: Number(props.element.padding) || 0,
+    wrap: 'none',
+    ellipsis: false,
+    stroke: hasOutline ? ts.color : (props.isSelected ? '#409EFF' : undefined),
+    strokeWidth: hasOutline ? Number(ts.width) : (props.isSelected ? 1 : 0),
+    strokeScaleEnabled: false,
+    fillAfterStrokeEnabled: true,
+  }
+  if (hasShadow) {
+    cfg.shadowColor = td.color
+    cfg.shadowBlur = Number(td.blur)
+    cfg.shadowOffsetX = td.offsetX || 0
+    cfg.shadowOffsetY = td.offsetY || 0
+  }
+  return cfg
+})
 
 function onDragEnd(e: any) {
   const node = e.target
@@ -139,13 +165,15 @@ function onTransformEnd(e: any) {
   const sy = node.scaleY()
   node.scaleX(1)
   node.scaleY(1)
+  const newWidth = Math.round((props.element.width || 500) * Math.abs(sx))
   editorStore.updateElement(props.element.id, {
     x: Math.round(node.x()),
     y: Math.round(node.y()),
     rotation: Math.round(node.rotation()),
-    width: Math.round((props.element.width || 500) * Math.abs(sx)),
+    width: newWidth,
     height: Math.round((props.element.height || 100) * Math.abs(sy)),
     fontSize: Math.round((props.element.fontSize || 32) * Math.abs(sy)),
+    textWrapWidth: newWidth,
   })
 }
 </script>

@@ -3,6 +3,9 @@ import { ref, computed } from 'vue'
 import { getProgram, saveConfig } from '@/api/project'
 import type { PageItem, LayerItem, ElementItem, Animation, Hotspot, ProgramConfig } from '@/types'
 import { createLayerFromElement, genId } from '@/utils/elementFactory'
+import { getDecorDef } from '@/utils/decorShapes'
+import { applyButtonPreset, getButtonPreset } from '@/utils/buttonStyles'
+import { fitTextSize } from '@/utils/textFit'
 
 export const useEditorStore = defineStore('editor', () => {
   const programId = ref('')
@@ -122,6 +125,43 @@ export const useEditorStore = defineStore('editor', () => {
     if (!currentPage.value) return
     pushHistory()
     const layer = createLayerFromElement(type, x, y, w, h)
+    if (type === 'text' && layer.element.autoFitText !== false) {
+      layer.element.textWrapWidth = device.value.designWidth
+      const size = fitTextSize(layer.element, device.value.designWidth, layer.element.textWrapWidth)
+      layer.element.width = size.width
+      layer.element.height = size.height
+    }
+    currentPage.value.layers.push(layer)
+    selectedLayerIds.value = [layer.element.id]
+    pushHistory()
+  }
+
+  /** 让文字元素尺寸贴合其内容（自动换行上限为画布宽度）。 */
+  function fitTextElement(id: string) {
+    if (!currentPage.value) return
+    const layer = currentPage.value.layers.find(l => l.element.id === id)
+    if (!layer || layer.element.type !== 'text') return
+    const size = fitTextSize(layer.element, device.value.designWidth, layer.element.textWrapWidth)
+    if (layer.element.width === size.width && layer.element.height === size.height) return
+    pushHistory()
+    layer.element.width = size.width
+    layer.element.height = size.height
+    pushHistory()
+  }
+
+  function addDecorLayerAt(decorId: string, x?: number, y?: number) {
+    if (!currentPage.value) return
+    pushHistory()
+    const def = getDecorDef(decorId)
+    const w = Math.min(def.defaultW, device.value.designWidth * 0.9)
+    const h = Math.min(def.defaultH, device.value.designHeight * 0.9)
+    const px = x ?? Math.round((device.value.designWidth - w) / 2)
+    const py = y ?? Math.round((device.value.designHeight - h) / 2)
+    const layer = createLayerFromElement('decor', px, py, w, h)
+    const el = layer.element
+    el.decorId = decorId
+    el.name = def.name
+    layer.name = def.name
     currentPage.value.layers.push(layer)
     selectedLayerIds.value = [layer.element.id]
     pushHistory()
@@ -163,6 +203,92 @@ export const useEditorStore = defineStore('editor', () => {
     }
   }
 
+  const CONTROL_KINDS: Record<string, { icon: string; label: string; action: string }> = {
+    prev: { icon: 'prev', label: '上一页', action: 'prevPage' },
+    next: { icon: 'next', label: '下一页', action: 'nextPage' },
+    home: { icon: 'home', label: '首页', action: 'homePage' },
+    last: { icon: 'last', label: '末页', action: 'lastPage' },
+    play: { icon: 'play', label: '播放', action: 'play' },
+    pause: { icon: 'pause', label: '暂停', action: 'pause' },
+    stop: { icon: 'stop', label: '停止', action: 'stop' },
+  }
+
+  /** 一键生成带图标+文字+样式的功能按钮（自动写好热区动作）。 */
+  function addControlButton(kind: string) {
+    if (!currentPage.value) return
+    const spec = CONTROL_KINDS[kind]
+    if (!spec) return
+    pushHistory()
+    const w = 170
+    const h = 60
+    const x = Math.round((device.value.designWidth - w) / 2)
+    const y = Math.round((device.value.designHeight - h) / 2 + 220)
+    const layer = createLayerFromElement('button', x, y, w, h)
+    const el = layer.element
+    const preset = getButtonPreset('tech-gradient')
+    if (preset) applyButtonPreset(el, preset)
+    Object.assign(el, {
+      name: spec.label,
+      icon: spec.icon,
+      label: spec.label,
+      labelColor: '#ffffff',
+      labelSize: 26,
+      labelGap: 12,
+      layout: 'row',
+      iconSize: 30,
+      preset: 'tech-gradient',
+      backgroundShape: 'roundedRect',
+      cornerRadius: 999,
+    })
+    layer.name = spec.label
+    layer.hotspot = {
+      enabled: true, trigger: 'click', action: spec.action,
+      target: '', cursor: 'pointer', highlight: true,
+      scope: 'local', targetDeviceCodes: [], commandParams: {},
+    }
+    currentPage.value.layers.push(layer)
+    selectedLayerIds.value = [layer.element.id]
+    pushHistory()
+  }
+
+  // 为图片/视频列表一键生成“上一张/下一张”纯文字控制按钮(热区自动绑定目标元素)
+  function addMediaControlButton(mediaElementId: string, direction: 'prev' | 'next') {
+    const page = currentPage.value
+    if (!page) return
+    const mediaLayer = page.layers.find(l => l.element.id === mediaElementId)
+    if (!mediaLayer) return
+    const me = mediaLayer.element
+    if (me.type !== 'image' && me.type !== 'video') return
+
+    pushHistory()
+    const w = 110
+    const h = 46
+    const y = Math.round((me.y || 0) + (me.height || 200) / 2 - h / 2)
+    const x = direction === 'prev'
+      ? Math.round((me.x || 0) + 16)
+      : Math.round((me.x || 0) + (me.width || 300) - w - 16)
+    const layer = createLayerFromElement('button', x, y, w, h)
+    const el = layer.element
+    layer.name = direction === 'prev' ? '上一张' : '下一张'
+    el.name = layer.name
+    el.icon = ''
+    el.label = direction === 'prev' ? '上一张' : '下一张'
+    el.labelColor = '#ffffff'
+    el.labelSize = 20
+    el.backgroundShape = 'roundedRect'
+    el.cornerRadius = 23
+    el.fill = 'rgba(0,0,0,0.45)'
+    layer.hotspot = {
+      enabled: true, trigger: 'click',
+      action: direction === 'prev' ? 'mediaPrev' : 'mediaNext',
+      target: mediaElementId, cursor: 'pointer', highlight: true,
+      scope: 'local', targetDeviceCodes: [], commandParams: {},
+    }
+    page.layers.push(layer)
+    selectedLayerIds.value = [el.id]
+    pushHistory()
+  }
+
   function isCloseToElement(el: ElementItem, dropX: number, dropY: number): boolean {
     const left = el.x
     const top = el.y
@@ -173,7 +299,7 @@ export const useEditorStore = defineStore('editor', () => {
            dropY >= top - margin && dropY <= bottom + margin
   }
 
-  function addElementForAsset(asset: any, x: number = 100, y: number = 100) {
+  function addElementForAsset(asset: any, x: number = 100, y: number = 100, hitElementId?: string) {
     if (!currentPage.value) return
     pushHistory()
 
@@ -185,34 +311,50 @@ export const useEditorStore = defineStore('editor', () => {
         folderThumbnail: asset.folderThumbnail,
       }
 
-      if (selectedLayerIds.value.length === 1) {
+      let targetSeq: ElementItem | null = null
+      const hitSeq = hitElementId ? currentPage.value.layers.find(l => l.element.id === hitElementId) : null
+      if (hitSeq?.element.type === 'sequenceFrame') targetSeq = hitSeq.element
+      if (!targetSeq && selectedLayerIds.value.length === 1) {
         const selId = selectedLayerIds.value[0]
         const selLayer = currentPage.value.layers.find(l => l.element.id === selId)
-        if (selLayer && selLayer.element.type === 'sequenceFrame' && isCloseToElement(selLayer.element, x, y)) {
-          const el = selLayer.element
-          if (!el.seqSources) el.seqSources = []
-          const frames = (seqData.frames || []).map((f: any) => ({ src: f.src, index: f.index }))
-          el.seqSources.push({ type: 'folder', frames, name: seqData.folderName || '序列帧', frameCount: frames.length, loopCount: 1, contentX: 0 })
-          pushHistory()
-          return
-        }
+        if (selLayer?.element.type === 'sequenceFrame' && isCloseToElement(selLayer.element, x, y)) targetSeq = selLayer.element
+      }
+      if (targetSeq) {
+        const el = targetSeq
+        if (!el.seqSources) el.seqSources = []
+        const frames = (seqData.frames || []).map((f: any) => ({ src: f.src, index: f.index }))
+        el.seqSources.push({ type: 'folder', frames, name: seqData.folderName || '序列帧', frameCount: frames.length, loopCount: 1, contentX: 0 })
+        pushHistory()
+        return
       }
 
       addSequenceFrameFromDrag(seqData, x, y)
       return
     }
 
-    if (asset.file_type !== 'video' && selectedLayerIds.value.length === 1) {
+    const isVideo = asset.file_type === 'video'
+    const targetType = isVideo ? 'video' : 'image'
+
+    // 优先按鼠标落点的实际元素判定(兼容放大/缩小/旋转后的真实可见区域),
+    // 取不到落点元素时再回退到“选中单个同类元素且落点靠近”的旧逻辑。
+    let targetEl: ElementItem | null = null
+    const hitLayer = hitElementId ? currentPage.value.layers.find(l => l.element.id === hitElementId) : null
+    if (hitLayer?.element.type === targetType) targetEl = hitLayer.element
+    if (!targetEl && selectedLayerIds.value.length === 1) {
       const selId = selectedLayerIds.value[0]
       const selLayer = currentPage.value.layers.find(l => l.element.id === selId)
-      if (selLayer && selLayer.element.type === 'image' && isCloseToElement(selLayer.element, x, y)) {
-        const el = selLayer.element
-        if (!el.srcs) el.srcs = []
-        if (el.src && !el.srcs.includes(el.src)) el.srcs.unshift(el.src)
-        if (!el.srcs.includes(asset.hash_key)) {
-          el.srcs.push(asset.hash_key)
-          if (!el.srcNames) el.srcNames = []
-          el.srcNames.push(asset.original_name || '')
+      if (selLayer?.element.type === targetType && isCloseToElement(selLayer.element, x, y)) targetEl = selLayer.element
+    }
+
+    if (targetEl) {
+      const el = targetEl
+      if (!el.srcs) el.srcs = []
+      if (el.src && !el.srcs.includes(el.src)) el.srcs.unshift(el.src)
+      if (!el.srcs.includes(asset.hash_key)) {
+        el.srcs.push(asset.hash_key)
+        if (!el.srcNames) el.srcNames = []
+        el.srcNames.push(asset.original_name || '')
+        if (!isVideo) {
           if (!el.captions) el.captions = []
           if (el.captions.length < el.srcs.length) {
             el.captions = [...el.captions, ...Array(el.srcs.length - el.captions.length).fill('')]
@@ -222,31 +364,13 @@ export const useEditorStore = defineStore('editor', () => {
             el.captionPositions = [...el.captionPositions, ...Array(el.srcs.length - el.captionPositions.length).fill(null)]
           }
         }
-        el.src = asset.hash_key
-        pushHistory()
-        return
       }
+      el.src = asset.hash_key
+      pushHistory()
+      return
     }
 
-    if (asset.file_type === 'video' && selectedLayerIds.value.length === 1) {
-      const selId = selectedLayerIds.value[0]
-      const selLayer = currentPage.value.layers.find(l => l.element.id === selId)
-      if (selLayer && selLayer.element.type === 'video' && isCloseToElement(selLayer.element, x, y)) {
-        const el = selLayer.element
-        if (!el.srcs) el.srcs = []
-        if (el.src && !el.srcs.includes(el.src)) el.srcs.unshift(el.src)
-        if (!el.srcs.includes(asset.hash_key)) {
-          el.srcs.push(asset.hash_key)
-          if (!el.srcNames) el.srcNames = []
-          el.srcNames.push(asset.original_name || '')
-        }
-        el.src = asset.hash_key
-        pushHistory()
-        return
-      }
-    }
-
-    const layer = createLayerFromElement(asset.file_type === 'video' ? 'video' : 'image', x, y, 300, 200)
+    const layer = createLayerFromElement(targetType, x, y, 300, 200)
     if (layer.element.type === 'image') {
       layer.element.src = asset.hash_key
       layer.element.srcs = [asset.hash_key]
@@ -267,6 +391,18 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   function updateElement(id: string, props: Record<string, any>) {
+    if (!currentPage.value) return
+    pushHistory()
+    for (const layer of currentPage.value.layers) {
+      if (layer.element.id === id) {
+        Object.assign(layer.element, props)
+        break
+      }
+    }
+    pushHistory()
+  }
+
+  function updateElementBatch(id: string, props: Record<string, any>) {
     if (!currentPage.value) return
     pushHistory()
     for (const layer of currentPage.value.layers) {
@@ -361,21 +497,58 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   function removeElement(id: string) {
-    if (!currentPage.value) return
+    const page = currentPage.value
+    if (!page) return
+    const target = page.layers.find(l => l.element.id === id)
+    if (!target) return
     pushHistory()
-    currentPage.value.layers = currentPage.value.layers.filter(l => l.element.id !== id)
+    if (target.element.type === 'container') {
+      // 删除容器即解散分组,成员还原为普通图层
+      ;(target.element.members || []).forEach((mid: string) => {
+        const m = page.layers.find(l => l.element.id === mid)
+        if (m) m.groupParentId = undefined
+      })
+    } else {
+      // 从所有容器成员表里移除
+      page.layers.forEach(l => {
+        const mem = l.element.members
+        if (Array.isArray(mem)) {
+          const i = mem.indexOf(id)
+          if (i >= 0) mem.splice(i, 1)
+        }
+      })
+    }
+    page.layers = page.layers.filter(l => l.element.id !== id)
     selectedLayerIds.value = selectedLayerIds.value.filter(sid => sid !== id)
     pushHistory()
   }
 
-  function selectLayer(id: string, multi: boolean = false) {
+  function selectLayer(id: string, multi: boolean = false, additiveOnly: boolean = false) {
     if (multi) {
       const idx = selectedLayerIds.value.indexOf(id)
-      if (idx >= 0) selectedLayerIds.value.splice(idx, 1)
-      else selectedLayerIds.value.push(id)
+      if (idx >= 0) {
+        if (!additiveOnly) selectedLayerIds.value.splice(idx, 1)
+      } else {
+        selectedLayerIds.value.push(id)
+      }
     } else {
       selectedLayerIds.value = [id]
     }
+  }
+
+  function setSelection(ids: string[]) {
+    selectedLayerIds.value = [...new Set(ids)]
+  }
+
+  function addToSelection(ids: string[]) {
+    selectedLayerIds.value = [...new Set([...selectedLayerIds.value, ...ids])]
+  }
+
+  function selectAllLayers() {
+    if (!currentPage.value) return
+    selectedLayerIds.value = currentPage.value.layers
+      .filter(l => l.visible !== false)
+      .map(l => l.element.id)
   }
 
   function clearSelection() {
@@ -450,6 +623,170 @@ export const useEditorStore = defineStore('editor', () => {
     pushHistory()
   }
 
+  // ---- 容器(分组):把多个元素编组成容器,移动容器即整体移动;成员仍是普通图层,可单独编辑 ----
+  function groupSelection() {
+    const page = currentPage.value
+    if (!page) return
+    const sel = page.layers.filter(l =>
+      selectedLayerIds.value.includes(l.element.id) &&
+      !l.groupParentId && l.element.type !== 'container'
+    )
+    if (sel.length < 2) return
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    sel.forEach((l: any) => {
+      const e = l.element
+      const x = e.x || 0, y = e.y || 0
+      const w = e.width || 0, h = e.height || 0
+      minX = Math.min(minX, x); minY = Math.min(minY, y)
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h)
+    })
+    const pad = 10
+    pushHistory()
+    const layer = createLayerFromElement(
+      'container',
+      Math.round(minX - pad), Math.round(minY - pad),
+      Math.max(20, Math.round(maxX - minX + pad * 2)),
+      Math.max(20, Math.round(maxY - minY + pad * 2))
+    )
+    const groupNo = page.layers.filter(l => l.element.type === 'container').length + 1
+    layer.name = `分组${groupNo}`
+    layer.element.name = layer.name
+    layer.element.members = sel.map((l: any) => l.element.id)
+    // 容器放在成员之后之前(靠后),虚线框不遮住内部元素,点击空白处仍可选中/拖动容器
+    const indices = sel.map((l: any) => page.layers.indexOf(l)).filter(i => i >= 0)
+    const at = Math.min(...indices)
+    page.layers.splice(at, 0, layer)
+    sel.forEach((l: any) => { l.groupParentId = layer.element.id })
+    selectedLayerIds.value = [layer.element.id]
+    pushHistory()
+  }
+
+  function ungroupContainer(containerId: string) {
+    const page = currentPage.value
+    if (!page) return
+    const cl = page.layers.find(l => l.element.id === containerId)
+    if (!cl || cl.element.type !== 'container') return
+    const members: string[] = cl.element.members || []
+    pushHistory()
+    page.layers = page.layers.filter(l => l.element.id !== containerId)
+    members.forEach(id => {
+      const m = page.layers.find(l => l.element.id === id)
+      if (m) m.groupParentId = undefined
+    })
+    selectedLayerIds.value = [...members]
+    pushHistory()
+  }
+
+  /** 仅平移分组内的成员。分组框自身的位置由 ContainerElement 的 dragend 写回，
+   *  这里不再累加，避免重复计算导致框与成员错位/跳动。 */
+  function translateGroupMembers(containerId: string, dx: number, dy: number) {
+    if (!currentPage.value) return
+    const cl = currentPage.value.layers.find(l => l.element.id === containerId)
+    if (!cl || cl.element.type !== 'container') return
+    const members: string[] = cl.element.members || []
+    if (!members.length || (!dx && !dy)) return
+    pushHistory()
+    currentPage.value.layers.forEach(l => {
+      if (!members.includes(l.element.id)) return
+      const e = l.element
+      e.x = Math.round((e.x || 0) + dx)
+      e.y = Math.round((e.y || 0) + dy)
+      const sources = e.seqSources
+      if (Array.isArray(sources)) {
+        for (const s of sources) {
+          const to = s?.move?.to
+          if (to && typeof to.x === 'number') to.x = Math.round(to.x + dx)
+          if (to && typeof to.y === 'number') to.y = Math.round(to.y + dy)
+        }
+      }
+    })
+    pushHistory()
+  }
+
+  /** 根据成员元素的包围盒重算容器矩形(带 10px 内边距)。 */
+  function fitContainerBounds(containerId: string) {
+    const page = currentPage.value
+    if (!page) return
+    const cl = page.layers.find(l => l.element.id === containerId)
+    if (!cl || cl.element.type !== 'container') return
+    const members: string[] = cl.element.members || []
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    members.forEach(id => {
+      const m = page.layers.find(l => l.element.id === id)
+      if (!m) return
+      const e: any = m.element
+      minX = Math.min(minX, e.x || 0)
+      minY = Math.min(minY, e.y || 0)
+      maxX = Math.max(maxX, (e.x || 0) + (e.width || 0))
+      maxY = Math.max(maxY, (e.y || 0) + (e.height || 0))
+    })
+    if (!Number.isFinite(minX)) return
+    const pad = 10
+    cl.element.x = Math.round(minX - pad)
+    cl.element.y = Math.round(minY - pad)
+    cl.element.width = Math.max(20, Math.round(maxX - minX + pad * 2))
+    cl.element.height = Math.max(20, Math.round(maxY - minY + pad * 2))
+  }
+
+  function addToContainer(containerId: string, ids: string[]) {
+    const page = currentPage.value
+    if (!page) return
+    const cl = page.layers.find(l => l.element.id === containerId)
+    if (!cl || cl.element.type !== 'container') return
+    if (!Array.isArray(cl.element.members)) cl.element.members = []
+    const members: string[] = cl.element.members
+    const targets = ids.filter(id => {
+      if (id === containerId) return false
+      const l = page.layers.find(x => x.element.id === id)
+      return !!l && l.element.type !== 'container'
+    })
+    if (!targets.length) return
+    pushHistory()
+    targets.forEach(id => {
+      // 先从其它容器移出
+      page.layers.forEach(o => {
+        if (o.element.type === 'container' && Array.isArray(o.element.members)) {
+          const i = o.element.members.indexOf(id)
+          if (i >= 0) o.element.members.splice(i, 1)
+        }
+      })
+      if (!members.includes(id)) members.push(id)
+      const l = page.layers.find(x => x.element.id === id)
+      if (l) l.groupParentId = containerId
+    })
+    fitContainerBounds(containerId)
+    selectedLayerIds.value = [containerId]
+    pushHistory()
+  }
+
+  function removeFromContainer(ids: string[]) {
+    const page = currentPage.value
+    if (!page) return
+    const targetSet = new Set(ids)
+    const isMember = (id: string) => page.layers.some(o =>
+      o.element.type === 'container' && Array.isArray(o.element.members) && o.element.members.includes(id)
+    )
+    const needsChange = ids.some(id => {
+      const l = page.layers.find(x => x.element.id === id)
+      return !!l && (!!l.groupParentId || isMember(id))
+    })
+    if (!needsChange) return
+    pushHistory()
+    page.layers.forEach(o => {
+      if (o.element.type === 'container' && Array.isArray(o.element.members)) {
+        o.element.members = o.element.members.filter((m: string) => !targetSet.has(m))
+      }
+    })
+    ids.forEach(id => {
+      const l = page.layers.find(x => x.element.id === id)
+      if (l) l.groupParentId = undefined
+    })
+    // 还原为普通多选,便于继续操作
+    selectedLayerIds.value = ids.filter(id => page.layers.some(l => l.element.id === id))
+    pushHistory()
+  }
+
   function reorderPages(fromIdx: number, toIdx: number) {
     pushHistory()
     const page = pages.value.splice(fromIdx, 1)[0]
@@ -499,16 +836,75 @@ export const useEditorStore = defineStore('editor', () => {
     pushHistory()
   }
 
+  function pruneLayerFromPage(page: PageItem, layerId: string) {
+    page.layers.forEach(l => {
+      const mem = l.element.members
+      if (Array.isArray(mem)) {
+        const i = mem.indexOf(layerId)
+        if (i >= 0) mem.splice(i, 1)
+      }
+    })
+    page.layers = page.layers.filter(l => l.element.id !== layerId)
+    selectedLayerIds.value = selectedLayerIds.value.filter(id => id !== layerId)
+  }
+
   function setPageBackground(layerId: string) {
-    if (!currentPage.value) return
-    pushHistory()
-    const layer = currentPage.value.layers.find(l => l.element.id === layerId)
+    const page = currentPage.value
+    if (!page) return
+    const layer = page.layers.find(l => l.element.id === layerId)
     if (!layer) return
     const el = layer.element
-    if (el.type === 'image') {
-      currentPage.value.background = { type: 'image', assetHash: el.src || '', objectFit: 'cover', backgroundColor: '#000000' }
-    } else if (el.type === 'video') {
-      currentPage.value.background = { type: 'video', assetHash: el.src || '', objectFit: 'cover', backgroundColor: '#000000' }
+    if (el.type !== 'image' && el.type !== 'video') return
+    pushHistory()
+    page.background = {
+      type: el.type, assetHash: el.src || '', objectFit: 'cover', backgroundColor: '#000000'
+    }
+    // 设为背景后该元素不再需要,自动从图层中移除
+    pruneLayerFromPage(page, layerId)
+    pushHistory()
+  }
+
+  // 把图片/视频元素中“某一张素材”设为背景:该素材从列表中移除;若列表已空则整个元素消失
+  function setElementAssetAsBackground(layerId: string, hash: string) {
+    const page = currentPage.value
+    if (!page || !hash) return
+    const layer = page.layers.find(l => l.element.id === layerId)
+    if (!layer) return
+    const el = layer.element
+    if (el.type !== 'image' && el.type !== 'video') return
+    pushHistory()
+    page.background = {
+      type: el.type, assetHash: hash, objectFit: 'cover', backgroundColor: '#000000'
+    }
+
+    const srcs: string[] = Array.isArray(el.srcs) ? [...el.srcs] : []
+    const srcNames: string[] = Array.isArray(el.srcNames) ? [...el.srcNames] : []
+    const captions: any[] = Array.isArray(el.captions) ? [...el.captions] : []
+    const captionPositions: any[] = Array.isArray(el.captionPositions) ? [...el.captionPositions] : []
+    const idx = srcs.indexOf(hash)
+
+    if (idx < 0) {
+      // 兼容只有 src、没有 srcs 的旧数据
+      if (el.src === hash) pruneLayerFromPage(page, layerId)
+      pushHistory()
+      return
+    }
+
+    srcs.splice(idx, 1)
+    srcNames.splice(idx, 1)
+    if (captions.length > idx) captions.splice(idx, 1)
+    if (captionPositions.length > idx) captionPositions.splice(idx, 1)
+
+    if (srcs.length === 0) {
+      pruneLayerFromPage(page, layerId)
+    } else {
+      el.srcs = srcs
+      el.srcNames = srcNames
+      if (el.type === 'image') {
+        el.captions = captions
+        el.captionPositions = captionPositions
+      }
+      el.src = srcs[0]
     }
     pushHistory()
   }
@@ -569,17 +965,20 @@ export const useEditorStore = defineStore('editor', () => {
     currentPage, currentLayers, selectedLayers, selectedElement, canUndo, canRedo,
     loadProgram, getConfig, save,
     addPage, removePage, reorderPages, setCurrentPage,
-    addElement, addElementForAsset, addSequenceFrameFromDrag, updateElement, removeElement,
+    addElement, addDecorLayerAt, addControlButton, addElementForAsset, addSequenceFrameFromDrag, updateElement, updateElementBatch, removeElement, fitTextElement,
     setCaptionPositions,
     moveElementWithSeqTargets,
     alignCapture, startAlignCapture, setAlignDelta, stopAlignCapture, recordAlignCapture,
-    selectLayer, clearSelection,
+    selectLayer, setSelection, addToSelection, selectAllLayers, clearSelection,
     moveLayerUp, moveLayerDown, moveLayerToTop, moveLayerToBottom,
     setLayerVisibility, setLayerLock, reorderLayer,
+    groupSelection, ungroupContainer, translateGroupMembers,
+    addToContainer, removeFromContainer, fitContainerBounds,
+    addMediaControlButton,
     copyElement, pasteElement,
     addAnimation, removeAnimation, setHotspot,
     setZoom, setPan, fitToContainer,
-    setPageBackground, clearPageBackground, setPageBackgroundByHash,
+    setPageBackground, clearPageBackground, setPageBackgroundByHash, setElementAssetAsBackground,
     pushHistory, undo, redo
   }
 })

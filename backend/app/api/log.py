@@ -2,7 +2,7 @@ import uuid
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.services.log_service import get_logs as get_logs_svc, get_log_statistics, write_log
+from app.services.log_service import get_logs as get_logs_svc, get_log_statistics, write_log, delete_logs
 from app.services.auth_service import get_current_user
 from app.utils.response import success_response
 
@@ -22,6 +22,17 @@ async def list_logs(log_type: str | None = None, module: str | None = None,
 async def log_statistics(db: AsyncSession = Depends(get_db)):
     result = await get_log_statistics(db)
     return success_response(result)
+
+
+@router.delete("/logs")
+async def cleanup_logs(before: str | None = None, log_type: str | None = None,
+                       module: str | None = None, all: bool = False,
+                       db: AsyncSession = Depends(get_db),
+                       current_user=Depends(get_current_user)):
+    count = await delete_logs(db, before=before, log_type=log_type, module=module, delete_all=all)
+    await write_log(db, "info", "system", f"用户 {current_user.username} 清理了 {count} 条日志",
+                    operator_id=current_user.id)
+    return success_response({"deleted": count}, message=f"已清理 {count} 条日志")
 
 
 @router.get("/logs/{log_id}")

@@ -21,11 +21,11 @@ export function createTextElement(x = 100, y = 200, w = 500, h = 100): ElementIt
   return {
     ...createBaseElement('text', x, y, w, h),
     name: '文字',
-    content: '双击编辑文字',
+    content: '编辑文字',
     fontFamily: 'Microsoft YaHei', fontSize: 32, fontWeight: 'normal',
     fontStyle: 'normal', textAlign: 'center', lineHeight: 1.5,
     letterSpacing: 0, color: '#ffffff',
-    textOverflow: 'ellipsis', verticalAlign: 'middle', padding: 10
+    textOverflow: 'clip', verticalAlign: 'middle', padding: 10
   }
 }
 
@@ -35,6 +35,7 @@ export function createImageElement(x = 100, y = 100, w = 300, h = 200): ElementI
     name: '图片', src: '', srcs: [], srcNames: [], captions: [], captionPositions: [],
     objectFit: 'cover', brightness: 100, contrast: 100, saturation: 100, alt: '',
     currentIndex: 0, imageInterval: 3000, imageTransition: 'fade',
+    manualResumeDelay: 10000,
     captionFontSize: 16, captionColor: '#ffffff', captionFontFamily: 'Microsoft YaHei',
     captionTextAlign: 'center', captionFontWeight: 'normal', captionPosition: 'bottom',
     captionOffsetY: 0, captionPadding: 8, captionWidth: 0,
@@ -50,7 +51,8 @@ export function createVideoElement(x = 100, y = 100, w = 400, h = 300): ElementI
     ...createBaseElement('video', x, y, w, h),
     name: '视频', src: '', srcs: [], srcNames: [],
     loop: true, autoplay: true, muted: false,
-    startAt: 0, endAt: 60, poster: '', volume: 0.8
+    startAt: 0, endAt: 60, poster: '', volume: 0.8,
+    manualResumeDelay: 10000
   }
 }
 
@@ -81,7 +83,7 @@ export function createShapeElement(x = 100, y = 100, w = 200, h = 200): ElementI
 export function createContainerElement(x = 100, y = 100, w = 400, h = 300): ElementItem {
   return {
     ...createBaseElement('container', x, y, w, h),
-    name: '容器', clipOverflow: true, children: []
+    name: '分组', clipOverflow: true, children: []
   }
 }
 
@@ -99,6 +101,15 @@ export function createButtonElement(x = 100, y = 100, w = 120, h = 120): Element
   }
 }
 
+export function createDecorElement(x = 100, y = 100, w = 800, h = 400): ElementItem {
+  return {
+    ...createBaseElement('decor', x, y, w, h),
+    name: '装饰',
+    fill: '#4C9AFF',
+    stroke: { width: 4, color: '#7fb8ff', style: 'solid' },
+  }
+}
+
 const elementCreators: Record<string, (x: number, y: number, w: number, h: number) => ElementItem> = {
   text: createTextElement,
   image: createImageElement,
@@ -106,7 +117,8 @@ const elementCreators: Record<string, (x: number, y: number, w: number, h: numbe
   sequenceFrame: createSequenceFrameElement,
   shape: createShapeElement,
   container: createContainerElement,
-  button: createButtonElement
+  button: createButtonElement,
+  decor: createDecorElement
 }
 
 const buttonActionMap: Record<string, string> = {

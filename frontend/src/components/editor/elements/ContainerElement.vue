@@ -1,5 +1,5 @@
 <template>
-  <v-group v-if="visible" :config="groupConfig" @click="onClick" @mousedown="onMouseDown" @dragstart="onDragStart" @dragend="onDragEnd" @transformend="onTransformEnd">
+  <v-group v-if="visible" :config="groupConfig" @click="onClick" @dragend="onDragEnd" @transformend="onTransformEnd">
     <v-rect :config="borderConfig" />
     <v-text :config="labelConfig" />
   </v-group>
@@ -18,14 +18,6 @@ function onClick(e: any) {
   emit('select', e.evt || e)
 }
 
-let pressTime = 0
-function onMouseDown() { pressTime = Date.now() }
-function onDragStart(e: any) {
-  // 单击(短按)仅用于选中元素,不应触发拖动;只有按住足够久后才允许移动
-  if (Date.now() - pressTime < 250) {
-    e.target.stopDrag()
-  }
-}
 const visible = computed(() => props.layer?.visible !== false)
 const editorStore = useEditorStore()
 
@@ -33,6 +25,8 @@ const groupConfig = computed(() => ({
   x: props.element.x, y: props.element.y,
   rotation: props.element.rotation, opacity: props.element.opacity,
   draggable: !props.layer?.locked,
+  // 移动超过 4px 才判定为拖动,既能"跟手"又不会把单击误判成拖动
+  dragDistance: 4,
   elementId: props.element.id
 }))
 
@@ -47,7 +41,7 @@ const borderConfig = computed(() => ({
 }))
 
 const labelConfig = computed(() => ({
-  text: `${props.element.name || '容器'} (${(props.element.children || []).length}子元素)`,
+  text: `${props.element.name || '分组'} (${((props.element as any).members || props.element.children || []).length}成员)`,
   x: 8, y: (props.element.height || 300) - 24,
   fill: '#aaa', fontSize: 12
 }))

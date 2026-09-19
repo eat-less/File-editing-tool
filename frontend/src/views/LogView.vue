@@ -21,6 +21,9 @@
         <el-col :span="6">
           <el-input v-model="filters.keyword" placeholder="搜索" clearable @change="fetchData" />
         </el-col>
+        <el-col :span="6" style="text-align:right">
+          <el-button type="danger" plain @click="openCleanup">清理日志</el-button>
+        </el-col>
       </el-row>
     </el-card>
     <el-table :data="logs" border>
@@ -67,12 +70,28 @@
         <strong>解决方案：</strong>{{ currentDetail.solution }}
       </div>
     </el-dialog>
+
+    <el-dialog v-model="cleanupVisible" title="清理日志" width="480px">
+      <el-radio-group v-model="cleanupMode">
+        <el-radio value="days" style="display:block;margin-bottom:8px">保留最近 7 天，删除更早的日志</el-radio>
+        <el-radio value="filtered" style="display:block;margin-bottom:8px">按当前筛选条件删除</el-radio>
+        <el-radio value="all" style="display:block">清空全部日志</el-radio>
+      </el-radio-group>
+      <div v-if="cleanupMode === 'filtered'" style="margin-top:12px;color:#909399;font-size:13px">
+        将删除：类型 = {{ filters.log_type || '全部' }}，模块 = {{ filters.module || '全部' }}，关键词 = {{ filters.keyword || '无' }}
+      </div>
+      <template #footer>
+        <el-button @click="cleanupVisible = false">取消</el-button>
+        <el-button type="danger" :loading="cleanupLoading" @click="doCleanup">确认清理</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { getLogs } from '@/api/asset'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { getLogs, cleanupLogs } from '@/api/asset'
 import { formatDate } from '@/utils/validators'
 
 const logs = ref<any[]>([])
@@ -80,6 +99,9 @@ const total = ref(0)
 const detailVisible = ref(false)
 const currentDetail = ref<any>(null)
 const filters = reactive({ log_type: null as any, module: null as any, keyword: null as any, page: 1, page_size: 20 })
+const cleanupVisible = ref(false)
+const cleanupLoading = ref(false)
+const cleanupMode = ref<'days' | 'filtered' | 'all'>('days')
 
 onMounted(() => fetchData())
 
@@ -109,4 +131,38 @@ function moduleText(m: string) {
 }
 
 function showDetail(row: any) { currentDetail.value = row; detailVisible.value = true }
+
+function openCleanup() { cleanupMode.value = 'days'; cleanupVisible.value = true }
+
+async function doCleanup() {
+  const tip = cleanupMode.value === 'all' ? '确定清空全部日志？此操作不可恢复。' : '确定按所选范围清理日志？此操作不可恢复。'
+  try {
+    await ElMessageBox.confirm(tip, '警告', { type: 'warning' })
+  } catch {
+    return
+  }
+  const params: any = {}
+  if (cleanupMode.value === 'days') {
+    const d = new Date()
+    d.setDate(d.getDate() - 7)
+    params.before = d.toISOString()
+  } else if (cleanupMode.value === 'filtered') {
+    if (filters.log_type) params.log_type = filters.log_type
+    if (filters.module) params.module = filters.module
+    if (filters.keyword) params.keyword = filters.keyword
+  } else {
+    params.all = true
+  }
+  cleanupLoading.value = true
+  try {
+    const res: any = await cleanupLogs(params)
+    ElMessage.success(res.message || `已清理 ${res.data?.deleted || 0} 条日志`)
+    cleanupVisible.value = false
+    filters.page = 1
+    await fetchData()
+  } catch {
+  } finally {
+    cleanupLoading.value = false
+  }
+}
 </script>

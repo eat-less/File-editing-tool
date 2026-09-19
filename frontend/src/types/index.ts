@@ -80,6 +80,16 @@ export interface PageItem {
   layers: LayerItem[]
 }
 
+export interface GradientStopDef {
+  pos: number
+  color: string
+}
+
+export interface PageGradient {
+  angle: number
+  stops: GradientStopDef[]
+}
+
 export interface PageBackground {
   type: string
   backgroundColor?: string
@@ -88,6 +98,14 @@ export interface PageBackground {
   opacity?: number
   brightness?: number
   blur?: number
+  gradient?: PageGradient
+}
+
+export interface ElementShadow {
+  color: string
+  blur: number
+  offsetX?: number
+  offsetY?: number
 }
 
 export interface LayerItem {
@@ -96,6 +114,7 @@ export interface LayerItem {
   locked: boolean
   visible: boolean
   blendMode: string
+  groupParentId?: string
   element: ElementItem
   animations: Animation[]
   hotspot: Hotspot | null
@@ -125,6 +144,16 @@ export interface ElementItem {
   fill?: any
   stroke?: { width: number; color: string; style?: string }
   cornerRadius?: number
+  shadow?: ElementShadow
+  decorId?: string
+  preset?: string
+  label?: string
+  labelSize?: number
+  labelColor?: string
+  labelGap?: number
+  layout?: 'row' | 'column'
+  textStroke?: { width: number; color: string }
+  textShadow?: ElementShadow
   [key: string]: any
 }
 

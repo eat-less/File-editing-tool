@@ -26,6 +26,7 @@ logs/
 # --- 构建产物 ---
 frontend/dist/
 player-windows/dist/
+player-windows/release/
 
 # --- 播放器本机配置（每台机器各自维护） ---
 player-windows/player.config.json
@@ -39,3 +40,6 @@ backup/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# --- Office 临时文件 ---
+~$*

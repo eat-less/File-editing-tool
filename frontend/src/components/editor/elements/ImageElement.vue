@@ -138,15 +138,25 @@ const groupConfig = computed(() => ({
   shadowOffsetY: props.element.shadow?.offsetY || 0,
 }))
 
-const currentImageConfig = computed(() => ({
-  image: currentImage.value,
-  width: props.element.width || 300,
-  height: props.element.height || 200,
-  cornerRadius: props.element.borderRadius || 0,
-  opacity: transitioning.value ? 1 : 1,
-  stroke: props.isSelected ? '#409EFF' : undefined,
-  strokeWidth: props.isSelected ? 2 : 0
-}))
+const currentImageConfig = computed(() => {
+  const st = props.element.stroke
+  const hasBorder = st && Number(st.width) > 0
+  const cfg: any = {
+    image: currentImage.value,
+    width: props.element.width || 300,
+    height: props.element.height || 200,
+    cornerRadius: props.element.borderRadius || 0,
+    opacity: transitioning.value ? 1 : 1,
+  }
+  if (hasBorder) {
+    cfg.stroke = st.color
+    cfg.strokeWidth = Number(st.width)
+  } else if (props.isSelected) {
+    cfg.stroke = '#409EFF'
+    cfg.strokeWidth = 2
+  }
+  return cfg
+})
 
 const prevImageConfig = computed(() => ({
   image: prevImage.value,

@@ -19,3 +19,5 @@ export const deleteAsset = (hashKey: string) => request.delete(`/assets/${hashKe
 export const cleanupUnreferenced = () => request.post('/assets/cleanup-unreferenced')
 
 export const getLogs = (params?: any) => request.get('/logs', { params })
+
+export const cleanupLogs = (params?: any) => request.delete('/logs', { params })

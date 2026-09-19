@@ -13,4 +13,5 @@ contextBridge.exposeInMainWorld('playerAPI', {
   stateRead: () => ipcRenderer.invoke('state:read'),
   stateWrite: (payload) => ipcRenderer.invoke('state:write', payload),
   toggleFullscreen: () => ipcRenderer.invoke('window:toggleFullscreen'),
+  sendTcp: (payload) => ipcRenderer.invoke('tcp:send', payload),
 })

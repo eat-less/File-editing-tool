@@ -9,7 +9,7 @@
                autoplay loop muted />
       </div>
 
-      <div v-for="layer in currentPageData.layers" :key="layer.id"
+      <div v-for="layer in renderedLayers" :key="layer.id"
            v-show="layer.visible !== false"
            class="player-element"
            :style="getElementStyle(layer.element)"
@@ -25,14 +25,9 @@
                :src="assetUrl(src)"
                :style="{ width: '100%', height: '100%', objectFit: layer.element.objectFit || 'cover', position: 'absolute', inset: 0, transition: 'opacity 0.5s', opacity: getImageOpacity(layer.element, idx) }" />
           <div v-if="getScrimStyle(layer.element)" class="player-scrim" :style="getScrimStyle(layer.element)"></div>
-          <div v-if="showMediaControls(layer.element)" class="player-media-controls">
-            <button class="mini-btn" @click.stop="cycleMedia(layer.element, -1)">◀</button>
-            <span class="mini-label">{{ (mediaIndex[layer.element.id] || 0) + 1 }} / {{ getImageSrcs(layer.element).length }}</span>
-            <button class="mini-btn" @click.stop="cycleMedia(layer.element, 1)">▶</button>
-          </div>
         </template>
 
-        <div v-else-if="layer.element.type === 'text'" class="player-text" :style="getTextStyle(layer.element)">{{ getTextDisplay(layer.element) }}</div>
+        <div v-else-if="layer.element.type === 'text'" class="player-text" :style="getTextStyle(layer.element)">{{ getWrappedText(layer.element) }}</div>
 
         <div v-else-if="layer.element.type === 'video'" class="player-video">
           <video v-if="videoCurrentSrc[layer.element.id]"
@@ -45,11 +40,6 @@
                  @dblclick.stop="toggleVideoPlay(layer.element.id)" />
           <div v-else-if="hasMultipleVideos(layer.element)" class="player-video-placeholder">▶ 视频</div>
           <div v-else class="player-video-placeholder">▶ 视频</div>
-          <div v-if="showMediaControls(layer.element)" class="player-media-controls">
-            <button class="mini-btn" @click.stop="cycleMedia(layer.element, -1)">◀</button>
-            <span class="mini-label">{{ (mediaIndex[layer.element.id] || 0) + 1 }} / {{ getVideoSrcs(layer.element).length }}</span>
-            <button class="mini-btn" @click.stop="cycleMedia(layer.element, 1)">▶</button>
-          </div>
         </div>
 
         <div v-else-if="layer.element.type === 'sequenceFrame'" class="player-seq">
@@ -59,10 +49,13 @@
         </div>
 
         <div v-else-if="layer.element.type === 'button'" class="player-button" :style="getButtonStyle(layer.element)">
-          <svg :width="layer.element.iconSize || 60" :height="layer.element.iconSize || 60" viewBox="0 0 24 24"
-               :fill="layer.element.iconColor || '#ffffff'" style="pointer-events:none">
-            <path :d="getIconPath(layer.element.icon || 'play')" />
-          </svg>
+          <div class="player-button-content" :style="getButtonContentStyle(layer.element)">
+            <svg v-if="hasButtonIcon(layer.element)" :width="btnIconSize(layer.element)" :height="btnIconSize(layer.element)" viewBox="0 0 24 24"
+                 :fill="layer.element.iconColor || '#ffffff'" style="pointer-events:none;flex:none">
+              <path :d="getIconPath(layer.element.icon || 'play')" />
+            </svg>
+            <span v-if="layer.element.label" class="player-button-label" :style="getButtonLabelStyle(layer.element)">{{ layer.element.label }}</span>
+          </div>
         </div>
 
         <div v-else-if="layer.element.type === 'shape'" class="player-shape">
@@ -82,6 +75,13 @@
                      :fill="getShapeFill(layer.element)" :stroke="getShapeStroke(layer.element)"
                      :stroke-width="getShapeStrokeWidth(layer.element)" />
           </svg>
+        </div>
+
+        <div v-else-if="layer.element.type === 'decor'" class="player-decor">
+          <svg :viewBox="`0 0 ${layer.element.width || 100} ${layer.element.height || 100}`"
+               preserveAspectRatio="none"
+               v-html="decorSvgInnerHTML(layer.element)"
+               style="width:100%;height:100%;display:block" />
         </div>
 
         <div v-else-if="layer.element.type === 'container'" class="player-container" :style="containerStyle(layer.element)">
@@ -109,6 +109,10 @@
 import { ref, computed, watch, onMounted, onUnmounted, reactive } from 'vue'
 import { getIconPath } from '@/utils/icons'
 import { getTypewriterInterval, getEnterDuration } from '@/utils/appearEffect'
+import { decorSvgInnerHTML } from '@/utils/decorShapes'
+import { cssBackground } from '@/utils/paint'
+import { buttonRadiusCss } from '@/utils/buttonStyles'
+import { wrapTextToString, measureStyleFromElement, wrapWidthOf } from '@/utils/textWrap'
 import {
   normalizeSegments, segmentsTotalDuration, hasSegmentMove, evaluate,
 } from './seqChoreography'
@@ -120,6 +124,8 @@ const props = withDefaults(defineProps<{
   assetUrl: (hash: string) => string
   onCrossDevice?: (hotspot: Hotspot) => void
   onState?: (state: { pageIndex: number; pageCount: number; playing: boolean }) => void
+  onFullscreen?: () => void
+  onTcpSend?: (cfg: Record<string, any>) => void
   startIndex?: number
   autoPlay?: boolean
   videoControls?: boolean
@@ -143,6 +149,12 @@ const transitionDir = ref('')
 const currentPageData = computed(() => pages.value[currentPage.value] || null)
 const imageCaptionLayers = computed(() =>
   (currentPageData.value?.layers || []).filter(l => l.element.type === 'image')
+)
+// 编辑器端“分组容器”仅用于编辑编组,不在播放端作为整体渲染
+const renderedLayers = computed(() =>
+  (currentPageData.value?.layers || []).filter(l =>
+    !(l.element.type === 'container' && (l.element.members || []).length)
+  )
 )
 
 const pageStyle = computed(() => {
@@ -173,10 +185,15 @@ const transitionClass = computed(() => {
 
 const bgStyle = computed(() => {
   const bg = currentPageData.value?.background
-  return {
+  const style: Record<string, any> = {
     position: 'absolute' as const, inset: 0,
-    backgroundColor: bg?.backgroundColor || '#000000'
+    backgroundColor: bg?.backgroundColor || '#000000',
   }
+  if (bg?.type === 'gradient' && bg.gradient) {
+    style.backgroundColor = 'transparent'
+    style.background = cssBackground({ type: 'linearGradient', angle: bg.gradient.angle, stops: bg.gradient.stops }, '#000000')
+  }
+  return style
 })
 
 const bgMediaStyle = computed(() => {
@@ -214,7 +231,7 @@ function getElementStyle(el: any) {
     left = el.x
     top = el.y
   }
-  return {
+  const style: Record<string, any> = {
     position: 'absolute' as const,
     left: `${left}px`,
     top: `${top}px`,
@@ -225,6 +242,27 @@ function getElementStyle(el: any) {
     transition,
     zIndex: el.zIndex || 1,
   }
+  const sh = el.shadow
+  if (sh) {
+    if (el.type === 'image') {
+      style.boxShadow = `${sh.offsetX || 0}px ${sh.offsetY || 0}px ${Number(sh.blur) || 0}px ${sh.color || '#000'}`
+    } else if (el.type === 'decor' || el.type === 'shape') {
+      style.filter = `drop-shadow(${sh.offsetX || 0}px ${sh.offsetY || 0}px ${Number(sh.blur) || 0}px ${sh.color || '#000'})`
+    }
+  }
+  if (el.type === 'image') {
+    const b = el.stroke
+    if (b && Number(b.width) > 0) style.border = `${b.width}px solid ${b.color || '#000'}`
+  }
+  if (el.type === 'text') {
+    const ts = el.textStroke
+    if (ts && Number(ts.width) > 0 && ts.color) style.WebkitTextStroke = `${ts.width}px ${ts.color}`
+    const td = el.textShadow
+    if (td && Number(td.blur) > 0) {
+      style.textShadow = `${td.offsetX || 0}px ${td.offsetY || 0}px ${Number(td.blur) || 0}px ${td.color || '#000'}`
+    }
+  }
+  return style
 }
 
 function getChildStyle(child: any, objectFit?: string): Record<string, any> {
@@ -268,9 +306,18 @@ function extractRichText(content: any): string {
   return parts.join('')
 }
 
+function getTextRaw(el: any): string {
+  return typeof el.content === 'string' ? el.content : (extractRichText(el.content) || '文字')
+}
+
 function getTextDisplay(el: any): string {
   if ((el.appearEffect || 'none') === 'typewriter') return typedTexts.value[el.id] ?? ''
-  return typeof el.content === 'string' ? el.content : (extractRichText(el.content) || '文字')
+  return getTextRaw(el)
+}
+
+/** 与编辑器共用同一套换行算法，保留空格并保证两端一致。 */
+function getWrappedText(el: any): string {
+  return wrapTextToString(getTextDisplay(el), wrapWidthOf(el), measureStyleFromElement(el))
 }
 
 function getTextStyle(el: any) {
@@ -289,6 +336,8 @@ function getTextStyle(el: any) {
     boxSizing: 'border-box',
     overflow: 'hidden',
     wordBreak: 'break-word',
+    overflowWrap: 'break-word',
+    whiteSpace: 'pre',
     display: 'flex',
     alignItems: el.verticalAlign === 'top' ? 'flex-start' : el.verticalAlign === 'bottom' ? 'flex-end' : 'center',
     justifyContent: el.textAlign === 'left' ? 'flex-start' : el.textAlign === 'right' ? 'flex-end' : 'center',
@@ -343,7 +392,7 @@ function applyTextAppearEffects() {
     const el = layer.element
     if (el.type === 'text') {
       const eff = el.appearEffect || 'none'
-      if (eff === 'typewriter') startTypewriter(el.id, getTextDisplay(el), el.appearSpeed)
+      if (eff === 'typewriter') startTypewriter(el.id, getTextRaw(el), el.appearSpeed)
       else setAppear(el.id, eff, el.appearSpeed)
     } else if (el.type === 'image') {
       const eff = el.captionAppearEffect || 'none'
@@ -362,6 +411,14 @@ const mediaIndex = ref<Record<string, number>>({})
 const mediaTimers = new Map<string, ReturnType<typeof setInterval>>()
 const imageCycleIndex = ref<Record<string, number>>({})
 const imageCycleTimers = new Map<string, ReturnType<typeof setInterval>>()
+// 手动切换后暂停自动播放，等待该元素配置的空闲时长再恢复自动
+const imageResumeTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const videoResumeTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+function manualResumeDelay(el: any): number {
+  const v = Number(el.manualResumeDelay)
+  return Number.isFinite(v) && v > 0 ? v : 10000
+}
 
 function registerVideo(el: any, elementId: string) {
   if (el && !videoRegistered.has(elementId)) {
@@ -399,13 +456,6 @@ function getCycleMode(el: any): string {
   return el.cycleMode || (el.type === 'video' ? 'manual' : 'both')
 }
 
-function showMediaControls(el: any): boolean {
-  const srcs = el.type === 'video' ? getVideoSrcs(el) : getImageSrcs(el)
-  if (srcs.length <= 1) return false
-  const mode = getCycleMode(el)
-  return mode === 'manual' || mode === 'both'
-}
-
 function shouldAutoCycle(el: any): boolean {
   const srcs = el.type === 'video' ? getVideoSrcs(el) : getImageSrcs(el)
   if (srcs.length <= 1) return false
@@ -421,10 +471,11 @@ function cycleMedia(el: any, direction: number) {
   mediaIndex.value = { ...mediaIndex.value, [el.id]: next }
   if (el.type === 'video') {
     videoCurrentSrc.value = { ...videoCurrentSrc.value, [el.id]: srcs[next] }
-    stopVideoCycle(el.id)
+    pauseVideoAuto(el)
   } else {
     imageCycleIndex.value = { ...imageCycleIndex.value, [el.id]: next }
     reapplyCaptionEffect(el)
+    pauseImageAuto(el)
   }
 }
 
@@ -443,25 +494,49 @@ function reapplyCaptionEffect(el: any) {
   else setAppear(key, eff, el.captionAppearSpeed)
 }
 
+function stopImageAuto(elId: string) {
+  const t = imageCycleTimers.get(elId)
+  if (t) { clearInterval(t); imageCycleTimers.delete(elId) }
+  const r = imageResumeTimers.get(elId)
+  if (r) { clearTimeout(r); imageResumeTimers.delete(elId) }
+}
+
+function scheduleImageAuto(el: any) {
+  stopImageAuto(el.id)
+  if (!shouldAutoCycle(el)) return
+  const srcs = getImageSrcs(el)
+  if (srcs.length <= 1) return
+  const interval = el.imageInterval || 3000
+  const timer = setInterval(() => {
+    const current = imageCycleIndex.value[el.id] || 0
+    imageCycleIndex.value = { ...imageCycleIndex.value, [el.id]: (current + 1) % srcs.length }
+    reapplyCaptionEffect(el)
+  }, interval)
+  imageCycleTimers.set(el.id, timer)
+}
+
+/** 手动切换：立即停止自动，空闲 manualResumeDelay 毫秒后恢复自动（0=不恢复）。 */
+function pauseImageAuto(el: any) {
+  stopImageAuto(el.id)
+  if (!shouldAutoCycle(el)) return
+  const delay = manualResumeDelay(el)
+  const t = setTimeout(() => {
+    imageResumeTimers.delete(el.id)
+    scheduleImageAuto(el)
+  }, delay)
+  imageResumeTimers.set(el.id, t)
+}
+
 function startImageCycling() {
   stopImageCycling()
   pages.value.forEach(page => {
     page.layers.forEach(layer => {
       if (layer.element.type !== 'image') return
-      if (!shouldAutoCycle(layer.element)) return
-      const srcs = getImageSrcs(layer.element)
-      if (srcs.length <= 1) return
       const el = layer.element
-      const interval = el.imageInterval || 3000
       if (imageCycleIndex.value[el.id] === undefined) {
         imageCycleIndex.value = { ...imageCycleIndex.value, [el.id]: 0 }
       }
-      const timer = setInterval(() => {
-        const current = imageCycleIndex.value[el.id] || 0
-        imageCycleIndex.value = { ...imageCycleIndex.value, [el.id]: (current + 1) % srcs.length }
-        reapplyCaptionEffect(el)
-      }, interval)
-      imageCycleTimers.set(el.id, timer)
+      scheduleImageAuto(el)
     })
   })
 }
@@ -469,7 +544,55 @@ function startImageCycling() {
 function stopImageCycling() {
   imageCycleTimers.forEach(t => clearInterval(t))
   imageCycleTimers.clear()
+  imageResumeTimers.forEach(t => clearTimeout(t))
+  imageResumeTimers.clear()
   imageCycleIndex.value = {}
+}
+
+function stopVideoAuto(elId: string) {
+  const t = mediaTimers.get(elId)
+  if (t) { clearInterval(t); mediaTimers.delete(elId) }
+  const r = videoResumeTimers.get(elId)
+  if (r) { clearTimeout(r); videoResumeTimers.delete(elId) }
+}
+
+function scheduleVideoAuto(el: any) {
+  stopVideoAuto(el.id)
+  const srcs = getVideoSrcs(el)
+  if (!shouldAutoCycle(el) || srcs.length <= 1) return
+  const interval = el.imageInterval || el.videoInterval
+  if (interval) {
+    const timer = setInterval(() => {
+      const cur = mediaIndex.value[el.id] || 0
+      const next = (cur + 1) % srcs.length
+      mediaIndex.value = { ...mediaIndex.value, [el.id]: next }
+      videoCurrentSrc.value = { ...videoCurrentSrc.value, [el.id]: srcs[next] }
+    }, interval)
+    mediaTimers.set(el.id, timer)
+  } else {
+    const advanceTimer = setInterval(() => {
+      const video = videoRefs.get(el.id)
+      if (video && video.ended) {
+        const cur = mediaIndex.value[el.id] || 0
+        const next = (cur + 1) % srcs.length
+        mediaIndex.value = { ...mediaIndex.value, [el.id]: next }
+        videoCurrentSrc.value = { ...videoCurrentSrc.value, [el.id]: srcs[next] }
+      }
+    }, 500)
+    mediaTimers.set(el.id, advanceTimer)
+  }
+}
+
+/** 手动切换：立即停止自动，空闲 manualResumeDelay 毫秒后恢复自动（0=不恢复）。 */
+function pauseVideoAuto(el: any) {
+  stopVideoAuto(el.id)
+  if (!shouldAutoCycle(el)) return
+  const delay = manualResumeDelay(el)
+  const t = setTimeout(() => {
+    videoResumeTimers.delete(el.id)
+    scheduleVideoAuto(el)
+  }, delay)
+  videoResumeTimers.set(el.id, t)
 }
 
 function startVideoCycling() {
@@ -484,44 +607,16 @@ function startVideoCycling() {
         videoCurrentSrc.value = { ...videoCurrentSrc.value, [el.id]: src }
         mediaIndex.value = { ...mediaIndex.value, [el.id]: 0 }
       }
-      if (!shouldAutoCycle(el) || srcs.length <= 1) return
-      const interval = el.imageInterval || el.videoInterval
-      if (interval) {
-        const timer = setInterval(() => {
-          const cur = mediaIndex.value[el.id] || 0
-          const next = (cur + 1) % srcs.length
-          mediaIndex.value = { ...mediaIndex.value, [el.id]: next }
-          videoCurrentSrc.value = { ...videoCurrentSrc.value, [el.id]: srcs[next] }
-        }, interval)
-        mediaTimers.set(el.id, timer)
-      } else {
-        const advanceTimer = setInterval(() => {
-          const video = videoRefs.get(el.id)
-          if (video && video.ended) {
-            const cur = mediaIndex.value[el.id] || 0
-            const next = (cur + 1) % srcs.length
-            mediaIndex.value = { ...mediaIndex.value, [el.id]: next }
-            videoCurrentSrc.value = { ...videoCurrentSrc.value, [el.id]: srcs[next] }
-          }
-        }, 500)
-        mediaTimers.set(el.id, advanceTimer)
-      }
+      scheduleVideoAuto(el)
     })
   })
-}
-
-function stopVideoCycle(elId?: string) {
-  if (elId) {
-    const t = mediaTimers.get(elId)
-    if (t) { clearInterval(t); mediaTimers.delete(elId) }
-    return
-  }
-  videoRefs.forEach(v => { try { v.pause() } catch {} })
 }
 
 function stopVideoCycling() {
   mediaTimers.forEach(t => clearInterval(t))
   mediaTimers.clear()
+  videoResumeTimers.forEach(t => clearTimeout(t))
+  videoResumeTimers.clear()
 }
 
 function playAllVideos() {
@@ -865,22 +960,61 @@ function stopMoveAnimations() {
 }
 
 // ---------- buttons / shapes ----------
-function getButtonFill(el: any): string {
-  const f = el.fill
-  if (!f) return '#409EFF'
-  if (typeof f === 'string') return f
-  return f.color || '#409EFF'
-}
-
 function getButtonStyle(el: any) {
   const shape = el.backgroundShape || 'circle'
-  const fill = getButtonFill(el)
   const showBg = shape !== 'none'
-  return {
+  const style: Record<string, any> = {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     width: '100%', height: '100%',
-    background: showBg ? fill : 'transparent',
-    borderRadius: shape === 'circle' ? '50%' : `${el.cornerRadius ?? 8}px`,
+    borderRadius: buttonRadiusCss(el, el.width || 120, el.height || 120),
+    overflow: 'hidden',
+  }
+  if (showBg) {
+    style.background = cssBackground(el.fill, '#409EFF')
+    const st = el.stroke
+    if (st && Number(st.width) > 0) {
+      style.border = `${st.width}px solid ${st.color || '#409EFF'}`
+      if (st.style === 'dash') style.borderStyle = 'dashed'
+    }
+  }
+  const sh = el.shadow
+  if (showBg && sh) {
+    style.boxShadow = `${sh.offsetX || 0}px ${sh.offsetY || 0}px ${Number(sh.blur) || 0}px ${sh.color || '#000'}`
+  }
+  return style
+}
+
+function hasButtonIcon(el: any): boolean {
+  return !!el.icon && el.icon !== 'none'
+}
+
+function btnIconSize(el: any): number {
+  const s = Number(el.iconSize) || 60
+  const h = el.height || 120
+  return Math.min(s, Math.max(10, h - (el.label ? (Number(el.labelSize) || h * 0.4) * 0.4 : 8)))
+}
+
+function getButtonContentStyle(el: any): Record<string, string> {
+  const col = el.layout === 'column'
+  return {
+    display: 'flex',
+    flexDirection: col ? 'column' : 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: `${el.labelGap || 8}px`,
+    width: '100%', height: '100%',
+    boxSizing: 'border-box',
+  }
+}
+
+function getButtonLabelStyle(el: any): Record<string, string> {
+  const h = el.height || 120
+  return {
+    color: el.labelColor || '#ffffff',
+    fontSize: `${Math.min(Number(el.labelSize) || h * 0.4, h * 0.55)}px`,
+    lineHeight: '1.1',
+    whiteSpace: 'nowrap',
+    fontFamily: el.fontFamily || 'Microsoft YaHei',
   }
 }
 
@@ -945,6 +1079,67 @@ function resolvePageIndex(hotspot: Hotspot, currentIndex: number): number {
   }
 }
 
+function runAction(action: string, params: Record<string, any> = {}) {
+  switch (action) {
+    case 'switchPage': {
+      const target = params.pageId || params.target
+      const idx = pages.value.findIndex(p => p.id === target || p.name === target)
+      if (idx >= 0) goToPage(idx)
+      break
+    }
+    case 'nextPage':
+      switchToPage(currentPage.value, 1)
+      break
+    case 'prevPage':
+      switchToPage(currentPage.value, -1)
+      break
+    case 'homePage':
+      goToPage(0)
+      break
+    case 'lastPage':
+      goToPage(pages.value.length - 1)
+      break
+    case 'play':
+      setPlaying(true)
+      break
+    case 'pause':
+      setPlaying(false)
+      break
+    case 'stop':
+      stopGlobal()
+      break
+    case 'playVideo':
+      playAllVideos()
+      break
+    case 'pauseVideo':
+      pauseAllVideos()
+      break
+    case 'mediaPrev':
+    case 'mediaNext': {
+      const targetId = params.target || params.pageId
+      const targetLayer = currentPageData.value?.layers.find(l => l.element.id === targetId)
+      const targetEl = targetLayer?.element
+      if (targetEl && (targetEl.type === 'image' || targetEl.type === 'video')) {
+        cycleMedia(targetEl, action === 'mediaNext' ? 1 : -1)
+      }
+      break
+    }
+    case 'fullscreen':
+      props.onFullscreen?.()
+      break
+    case 'sendTcp':
+      props.onTcpSend?.(params)
+      break
+    case 'none':
+    case 'takeControl':
+      break
+    default:
+      // 未知动作：若上层提供了外部指令接收器则透传（如播放器级 TCP/自定义）
+      props.onTcpSend?.(params)
+      break
+  }
+}
+
 function onElementClick(layer: LayerItem) {
   const h = layer.hotspot
   if (!h?.enabled || h.trigger !== 'click') return
@@ -952,21 +1147,29 @@ function onElementClick(layer: LayerItem) {
     props.onCrossDevice?.(h)
     return
   }
-  switch (h.action) {
-    case 'switchPage':
-    case 'nextPage':
-    case 'prevPage': {
-      const idx = resolvePageIndex(h, currentPage.value)
-      goToPage(idx)
-      break
-    }
-    case 'playVideo':
-      playAllVideos()
-      break
-    case 'pause':
-      pauseAllVideos()
-      break
+  runAction(h.action, { ...(h.commandParams || {}), pageId: h.target, target: h.target })
+}
+
+function pausePlayback() {
+  stopAutoPlay()
+  stopImageCycling()
+  stopVideoCycling()
+  stopSequenceAnimations()
+  stopMoveAnimations()
+  pauseAllVideos()
+}
+
+function stopGlobal() {
+  pausePlayback()
+  const page = currentPageData.value
+  if (!page) return
+  for (const layer of page.layers) {
+    if (layer.element.type !== 'video') continue
+    const v = videoRefs.get(layer.element.id)
+    if (!v) continue
+    try { v.currentTime = 0 } catch {}
   }
+  reportState()
 }
 
 // ---------- playback control ----------
@@ -1077,41 +1280,19 @@ function setPlaying(v: boolean) {
     startSequenceAnimations()
     playAllVideos()
   } else {
-    stopAutoPlay()
-    pauseAllVideos()
+    pausePlayback()
   }
   reportState()
 }
 
 function executeAction(action: string, params: Record<string, any> = {}) {
-  switch (action) {
-    case 'nextPage':
-      switchToPage(currentPage.value, 1)
-      break
-    case 'prevPage':
-      switchToPage(currentPage.value, -1)
-      break
-    case 'switchPage': {
-      const target = params.pageId || params.target
-      const idx = pages.value.findIndex(p => p.id === target || p.name === target)
-      goToPage(idx >= 0 ? idx : currentPage.value)
-      break
-    }
-    case 'switchScene':
-    case 'switchProgram':
-      // 由播放器上层处理（需加载新节目配置）
-      props.onState?.({ pageIndex: currentPage.value, pageCount: pages.value.length, playing: playing.value })
-      break
-    case 'playVideo':
-      playAllVideos()
-      break
-    case 'pause':
-    case 'pauseVideo':
-      pauseAllVideos()
-      break
-    case 'takeControl':
-      break
+  if (action === 'switchScene' || action === 'switchProgram') {
+    // 由播放器上层处理（需加载新节目配置）
+    props.onState?.({ pageIndex: currentPage.value, pageCount: pages.value.length, playing: playing.value })
+    return
   }
+  if (action === 'takeControl') return
+  runAction(action, params)
 }
 
 function startAll() {
@@ -1212,6 +1393,7 @@ defineExpose({
 .player-seq { width: 100%; height: 100%; overflow: hidden; }
 .seq-scrub { cursor: grab; touch-action: none; }
 .player-button { cursor: pointer; }
+.player-decor { width: 100%; height: 100%; }
 .player-shape { width: 100%; height: 100%; }
 .player-container { position: relative; }
 .player-caption {
@@ -1219,18 +1401,6 @@ defineExpose({
   word-break: break-word; overflow-wrap: break-word;
 }
 .player-scrim { position: absolute; z-index: 8; pointer-events: none; }
-.player-media-controls {
-  position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
-  display: flex; align-items: center; gap: 8px; z-index: 10;
-  background: rgba(0,0,0,0.35); border-radius: 16px; padding: 2px 8px;
-}
-.player-video .player-media-controls { bottom: 40px; }
-.mini-btn {
-  width: 26px; height: 26px; border: 1px solid rgba(255,255,255,0.3);
-  background: rgba(0,0,0,0.4); color: #fff; border-radius: 50%;
-  font-size: 11px; cursor: pointer; line-height: 1;
-}
-.mini-label { color: #fff; font-size: 11px; }
 .player-empty {
   color: #888; display: flex; align-items: center; justify-content: center;
   width: 100%; height: 100%; font-size: 24px;

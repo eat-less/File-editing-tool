@@ -2,35 +2,35 @@
   <div ref="stageContainer" class="stage-container" @wheel="onWheel" @mousedown="onPanStart" @mousemove="onPanMove" @mouseup="onPanEnd" @dragover.prevent @drop="onDrop">
     <video v-if="bgVideoSrc" :src="bgVideoSrc" autoplay loop muted
            :style="bgVideoStyle" ref="bgVideoRef" />
-    <video v-for="vel in videoElements" :key="vel.id"
-           :ref="(el: any) => registerVideoEl(vel.id, el)"
-           :src="`/api/v1/assets/${vel.src}/file`"
-           :style="getVideoOverlayStyle(vel)"
-           autoplay :loop="vel.loop !== false" muted />
-    <v-stage ref="stageRef" :config="stageConfig" @click="onStageClick">
-      <v-layer>
-        <v-rect :config="bgConfig" />
-        <v-image v-if="bgImageConfig" :config="bgImageConfig" />
-      </v-layer>
-      <v-layer v-for="page in pages" :key="page.id" :visible="page.id === currentPage?.id">
-        <template v-for="layer in page.layers" :key="layer.id">
-          <component
-            v-if="layer.visible"
-            :is="getElementComponent(layer.element.type)"
-            :element="layer.element"
-            :layer="layer"
-            :is-selected="selectedIds.has(layer.element.id)"
-            @select="onSelectElement(layer.element.id, $event)"
-          />
-        </template>
-        <v-transformer ref="transformerRef" :config="transformerConfig" />
-      </v-layer>
-    </v-stage>
+    <div v-if="marquee.active" class="marquee-box" :style="marqueeStyle" />
+    <div class="stage-layer">
+      <v-stage ref="stageRef" :config="stageConfig" @click="onStageClick"
+               @mousedown="onStageMouseDown" @mousemove="onStageMouseMove" @mouseup="onStageMouseUp">
+        <v-layer>
+          <v-rect :config="bgConfig" />
+          <v-image v-if="bgImageConfig" :config="bgImageConfig" />
+        </v-layer>
+        <v-layer v-for="page in pages" :key="page.id" :visible="page.id === currentPage?.id">
+          <template v-for="layer in page.layers" :key="layer.id">
+            <component
+              v-if="layer.visible"
+              :key="layer.element.id"
+              :is="getElementComponent(layer.element.type)"
+              :element="layer.element"
+              :layer="layer"
+              :is-selected="selectedIds.has(layer.element.id)"
+              @select="onSelectElement(layer.element.id, $event)"
+            />
+          </template>
+          <v-transformer ref="transformerRef" :config="transformerConfig" />
+        </v-layer>
+      </v-stage>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import Konva from 'konva'
 import { useEditorStore } from '@/stores/editor'
 import TextElement from './elements/TextElement.vue'
@@ -40,8 +40,9 @@ import ShapeElement from './elements/ShapeElement.vue'
 import ContainerElement from './elements/ContainerElement.vue'
 import SequenceFrameElement from './elements/SequenceFrameElement.vue'
 import ButtonElement from './elements/ButtonElement.vue'
-import { isCrossDevice, resolvePageIndex } from '@/utils/hotspotAction'
+import DecorElement from './elements/DecorElement.vue'
 import { normalizeSegments, hasSegmentMove } from '@/render-engine/seqChoreography'
+import { konvaFillConfig } from '@/utils/paint'
 
 const editorStore = useEditorStore()
 const stageContainer = ref<HTMLElement>()
@@ -67,42 +68,6 @@ const stageConfig = computed(() => ({
 const bgImageLoaded = ref<HTMLImageElement | null>(null)
 const bgVideoRef = ref<HTMLVideoElement>()
 
-const videoElements = computed(() => {
-  const page = editorStore.currentPage
-  if (!page) return []
-  return page.layers
-    .filter(l => l.visible && l.element.type === 'video' && l.element.src)
-    .map(l => l.element)
-})
-
-const videoElRefs = new Map<string, HTMLVideoElement>()
-
-function registerVideoEl(id: string, el: any) {
-  if (el) {
-    videoElRefs.set(id, el)
-    el.play().catch(() => {})
-  }
-}
-
-function getVideoOverlayStyle(el: any) {
-  const zoom = editorStore.zoom
-  const panX = editorStore.panX
-  const panY = editorStore.panY
-  return {
-    position: 'absolute' as const,
-    left: `${el.x * zoom + panX}px`,
-    top: `${el.y * zoom + panY}px`,
-    width: `${el.width * zoom}px`,
-    height: `${el.height * zoom}px`,
-    objectFit: (el.objectFit || 'cover') as any,
-    pointerEvents: 'none' as any,
-    opacity: el.opacity ?? 1,
-    borderRadius: `${el.borderRadius || 0}px`,
-    transform: `rotate(${el.rotation || 0}deg)`,
-    transformOrigin: 'top left',
-  }
-}
-
 const bgVideoSrc = computed(() => {
   const bg = currentPage.value?.background
   if (bg?.type === 'video' && bg.assetHash) return `/api/v1/assets/${bg.assetHash}/file`
@@ -127,6 +92,7 @@ const bgVideoStyle = computed(() => ({
   height: `${editorStore.device.designHeight * editorStore.zoom}px`,
   objectFit: (currentPage.value?.background?.objectFit || 'cover') as any,
   pointerEvents: 'none' as any,
+  zIndex: 0,
   ...bgFilterStyle.value,
 }))
 
@@ -151,9 +117,16 @@ const bgConfig = computed(() => {
     listening: false,
     opacity: currentPage.value?.background?.opacity ?? 1,
   }
-  if (currentPage.value?.background?.blur) {
+  const bg = currentPage.value?.background
+  if (bg?.type === 'gradient' && bg.gradient) {
+    Object.assign(base, konvaFillConfig(
+      { type: 'linearGradient', angle: bg.gradient.angle, stops: bg.gradient.stops },
+      editorStore.device.designWidth, editorStore.device.designHeight, '#000000'
+    ))
+  }
+  if (bg?.blur) {
     base.filters = [Konva.Filters.Blur]
-    base.blurRadius = currentPage.value.background.blur
+    base.blurRadius = bg.blur
   }
   return base
 })
@@ -208,34 +181,115 @@ function getElementComponent(type: string) {
   const map: Record<string, any> = {
     text: TextElement, image: ImageElement, video: VideoElement,
     shape: ShapeElement, container: ContainerElement,
-    sequenceFrame: SequenceFrameElement, button: ButtonElement
+    sequenceFrame: SequenceFrameElement, button: ButtonElement, decor: DecorElement
   }
   return map[type] || TextElement
 }
 
 function onSelectElement(id: string, e: Event) {
-  const multi = (e as MouseEvent).ctrlKey || (e as MouseEvent).metaKey
-  editorStore.selectLayer(id, multi)
+  // 框选结束后浏览器仍会补发一次 click(可能落在元素上)，此处忽略避免覆盖框选结果
+  if (suppressNextStageClick) {
+    suppressNextStageClick = false
+    return
+  }
+  const me = e as MouseEvent
+  const ctrl = me.ctrlKey || me.metaKey
+  const shift = me.shiftKey
+  const multi = ctrl || shift
+  // Shift 只加选不反选；Ctrl/Cmd 保持 toggle
+  editorStore.selectLayer(id, multi, shift && !ctrl)
 }
 
 function onStageClick(e: any) {
-  if (e.target === e.target.getStage()) {
-    editorStore.clearSelection()
+  if (suppressNextStageClick) {
+    suppressNextStageClick = false
     return
   }
-  const node = e.target
-  const elId = node.attrs?.elementId || node.parent?.attrs?.elementId
-  if (elId) {
-    const page = editorStore.currentPage
-    if (page) {
-      const layer = page.layers.find(l => l.element.id === elId)
-      if (layer?.hotspot?.enabled && layer.hotspot.trigger === 'click') {
-        if (isCrossDevice(layer.hotspot)) return
-        const idx = resolvePageIndex(layer.hotspot, editorStore.pages, editorStore.currentPageIndex)
-        if (idx !== editorStore.currentPageIndex) editorStore.setCurrentPage(idx)
-      }
-    }
+  // 编辑器点击只负责选中与清空，绝不触发元素的播放端功能动作（翻页/播放等）
+  if (e.target === e.target.getStage()) {
+    editorStore.clearSelection()
   }
+}
+
+// ---- 空白处拖拽框选(marquee) ----
+const marquee = ref({ active: false, startX: 0, startY: 0, curX: 0, curY: 0 })
+let marqueeCandidate = false
+let marqueeAdditive = false
+let suppressNextStageClick = false
+
+const marqueeStyle = computed(() => {
+  const x = Math.min(marquee.value.startX, marquee.value.curX)
+  const y = Math.min(marquee.value.startY, marquee.value.curY)
+  return {
+    left: `${x}px`,
+    top: `${y}px`,
+    width: `${Math.abs(marquee.value.curX - marquee.value.startX)}px`,
+    height: `${Math.abs(marquee.value.curY - marquee.value.startY)}px`,
+  }
+})
+
+function pointerToContainer(e: any) {
+  const rect = stageContainer.value?.getBoundingClientRect()
+  if (!rect || !e?.evt) return null
+  return { x: e.evt.clientX - rect.left, y: e.evt.clientY - rect.top }
+}
+
+function onStageMouseDown(e: any) {
+  const stage = e.target?.getStage?.()
+  if (!stage) return
+  if (e.evt?.button !== 0 || e.evt?.altKey) return
+  if (e.target !== stage) return
+  const pos = pointerToContainer(e)
+  if (!pos) return
+  marqueeCandidate = true
+  marqueeAdditive = !!e.evt?.shiftKey
+  marquee.value = { active: false, startX: pos.x, startY: pos.y, curX: pos.x, curY: pos.y }
+}
+
+function onStageMouseMove(e: any) {
+  if (!marqueeCandidate) return
+  const pos = pointerToContainer(e)
+  if (!pos) return
+  if (!marquee.value.active) {
+    if (Math.abs(pos.x - marquee.value.startX) < 4 && Math.abs(pos.y - marquee.value.startY) < 4) return
+    marquee.value.active = true
+  }
+  marquee.value.curX = pos.x
+  marquee.value.curY = pos.y
+}
+
+function onStageMouseUp() {
+  if (!marqueeCandidate) return
+  marqueeCandidate = false
+  if (!marquee.value.active) return
+  const stage = stageRef.value?.getStage()
+  marquee.value.active = false
+  suppressNextStageClick = true
+  if (!stage) return
+  const rect = {
+    x: Math.min(marquee.value.startX, marquee.value.curX),
+    y: Math.min(marquee.value.startY, marquee.value.curY),
+    w: Math.abs(marquee.value.curX - marquee.value.startX),
+    h: Math.abs(marquee.value.curY - marquee.value.startY),
+  }
+  const pageIdx = editorStore.currentPageIndex + 1
+  const layer = stage.children?.[pageIdx]
+  if (!layer) return
+  const ids: string[] = []
+  layer.children?.forEach((node: any) => {
+    const id = node.attrs?.elementId
+    if (!id) return
+    const l = editorStore.currentPage?.layers.find(x => x.element.id === id)
+    if (!l || l.visible === false) return
+    let box: any
+    try { box = node.getClientRect() } catch { return }
+    if (!box) return
+    const intersects = box.x < rect.x + rect.w && box.x + box.width > rect.x &&
+                       box.y < rect.y + rect.h && box.y + box.height > rect.y
+    if (intersects) ids.push(id)
+  })
+  if (marqueeAdditive) editorStore.addToSelection(ids)
+  else editorStore.setSelection(ids)
 }
 
 function onWheel(e: WheelEvent) {
@@ -273,18 +327,140 @@ function onPanEnd() { isPanning.value = false }
 
 function onDrop(e: DragEvent) {
   e.preventDefault()
-  const data = e.dataTransfer?.getData('application/json')
-  if (!data) return
-  try {
-    const asset = JSON.parse(data)
-    if (!asset.hash_key && !asset.type) return
-    const rect = stageContainer.value?.getBoundingClientRect()
-    if (!rect) return
-    const x = Math.round((e.clientX - rect.left - editorStore.panX) / editorStore.zoom)
-    const y = Math.round((e.clientY - rect.top - editorStore.panY) / editorStore.zoom)
-    editorStore.addElementForAsset(asset, x, y)
-  } catch {}
+    const data = e.dataTransfer?.getData('application/json')
+    if (!data) return
+    try {
+      const asset = JSON.parse(data)
+      const rect = stageContainer.value?.getBoundingClientRect()
+      if (!rect) return
+      const px = e.clientX - rect.left
+      const py = e.clientY - rect.top
+      const x = Math.round((px - editorStore.panX) / editorStore.zoom)
+      const y = Math.round((py - editorStore.panY) / editorStore.zoom)
+      if (asset.type === 'decor' && asset.decorId) {
+        editorStore.addDecorLayerAt(asset.decorId, x, y)
+        return
+      }
+      if (!asset.hash_key && !asset.type) return
+      // 用 Konva 实际命中检测确定鼠标落在哪个元素上(能正确反映放大/缩小/旋转后的可见区域),
+      // 供“拖素材到已有同类元素上追加到列表”使用
+      let hitElementId = ''
+      try {
+        const stage = stageRef.value?.getStage()
+        const hit = stage?.getIntersection({ x: px, y: py })
+        let node: any = hit
+        while (node && !node.attrs?.elementId) node = node.getParent?.()
+        if (node?.attrs?.elementId) hitElementId = node.attrs.elementId
+      } catch {}
+      editorStore.addElementForAsset(asset, x, y, hitElementId)
+    } catch {}
 }
+
+// ---- 容器分组拖动:拖容器时带动其成员一起移动(仅视觉实时,结束时一次性写回) ----
+const groupDragState: Record<string, { baseX: number; baseY: number; starts: Array<{ id: string; x: number; y: number }> }> = {}
+
+function findPageNode(stage: any, elementId: string) {
+  const pageIdx = editorStore.currentPageIndex + 1
+  const layer = stage?.children?.[pageIdx]
+  return layer?.children?.find((c: any) => c.attrs?.elementId === elementId)
+}
+
+function onGroupDragStart(e: any) {
+  const node = e.target
+  const cId = node?.attrs?.elementId
+  if (!cId) return
+  const cl = editorStore.currentPage?.layers.find(l => l.element.id === cId)
+  if (cl?.element.type !== 'container') return
+  const members: string[] = cl.element.members || []
+  if (!members.length) return
+  // 拖动分组框即整体移动成员;顺带选中该分组,保证首次拖动(未预先选中)也生效
+  editorStore.setSelection([cId])
+  const stage = stageRef.value?.getStage()
+  const starts: Array<{ id: string; x: number; y: number }> = []
+  members.forEach(id => {
+    const n = findPageNode(stage, id)
+    if (n) starts.push({ id, x: n.x(), y: n.y() })
+  })
+  if (!starts.length) return
+  groupDragState[cId] = { baseX: node.x(), baseY: node.y(), starts }
+}
+
+function onGroupDragMove(e: any) {
+  const node = e.target
+  const st = groupDragState[node?.attrs?.elementId]
+  if (!st) return
+  const dx = node.x() - st.baseX
+  const dy = node.y() - st.baseY
+  const stage = stageRef.value?.getStage()
+  const pageIdx = editorStore.currentPageIndex + 1
+  const layer = stage?.children?.[pageIdx]
+  let dirty = false
+  st.starts.forEach(s => {
+    const n = layer?.children?.find((c: any) => c.attrs?.elementId === s.id)
+    if (n && (n.x() !== s.x + dx || n.y() !== s.y + dy)) {
+      n.position({ x: s.x + dx, y: s.y + dy })
+      dirty = true
+    }
+  })
+  if (dirty) layer?.batchDraw()
+}
+
+function onGroupDragEnd(e: any) {
+  const node = e.target
+  const cId = node?.attrs?.elementId
+  const st = groupDragState[cId]
+  if (!st) return
+  delete groupDragState[cId]
+  const dx = Math.round(node.x() - st.baseX)
+  const dy = Math.round(node.y() - st.baseY)
+  if (dx || dy) editorStore.translateGroupMembers(cId, dx, dy)
+}
+
+function attachGroupDragListeners() {
+  const stage = stageRef.value?.getStage()
+  if (!stage) return
+  stage.on('dragstart', onGroupDragStart)
+  stage.on('dragmove', onGroupDragMove)
+  stage.on('dragend', onGroupDragEnd)
+}
+
+function detachGroupDragListeners() {
+  const stage = stageRef.value?.getStage()
+  if (!stage) return
+  stage.off('dragstart', onGroupDragStart)
+  stage.off('dragmove', onGroupDragMove)
+  stage.off('dragend', onGroupDragEnd)
+}
+
+// 让 Konva 子节点顺序与图层数组顺序一致（预览/DOM 会自动按数组重排，Konva 不会）
+function syncElementOrder() {
+  const stage = stageRef.value?.getStage()
+  const page = editorStore.currentPage
+  if (!stage || !page) return
+  const layer = stage.children?.[editorStore.currentPageIndex + 1]
+  if (!layer) return
+  const nodes: any[] = []
+  for (const l of page.layers) {
+    const node = layer.children?.find((c: any) => c.attrs?.elementId === l.element.id)
+    if (node) nodes.push(node)
+  }
+  nodes.forEach((n, i) => { if (n.zIndex() !== i) n.zIndex(i) })
+  const tr = layer.children?.find((c: any) => c.className === 'Transformer')
+  if (tr) tr.moveToTop()
+  layer.batchDraw()
+}
+
+onMounted(() => {
+  nextTick(attachGroupDragListeners)
+  nextTick(syncElementOrder)
+  window.addEventListener('mouseup', onStageMouseUp)
+})
+onBeforeUnmount(() => {
+  detachGroupDragListeners()
+  window.removeEventListener('mouseup', onStageMouseUp)
+})
+
+
 
 function playEntryAnimations() {
   nextTick(() => {
@@ -386,9 +562,19 @@ watch(() => editorStore.currentPageIndex, () => {
 watch(() => editorStore.pages, () => {
   nextTick(() => playEntryAnimations())
 })
+
+// 图层增删/重排/切页后同步 Konva 层序
+watch(
+  () => editorStore.currentPage?.layers.map(l => l.id).join('|'),
+  () => nextTick(syncElementOrder),
+  { immediate: true }
+)
+watch(() => editorStore.currentPageIndex, () => nextTick(syncElementOrder))
 </script>
 
 <style scoped>
 .stage-container { width: 100%; height: 100%; overflow: hidden; background: #e8e8e8; position: relative; }
+.stage-layer { position: absolute; inset: 0; z-index: 1; }
 .stage-container canvas { background: transparent !important; }
+.marquee-box { position: absolute; z-index: 2; pointer-events: none; border: 1px dashed #409eff; background: rgba(64, 158, 255, 0.12); }
 </style>

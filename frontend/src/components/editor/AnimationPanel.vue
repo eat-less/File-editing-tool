@@ -16,8 +16,8 @@
       <div v-for="(anim, idx) in currentAnimations" :key="idx" style="padding:8px;border-bottom:1px solid #e4e7ed">
         <div style="color:#409EFF;margin-bottom:4px">{{ anim.type }}</div>
         <el-form size="small" label-position="left" label-width="60px">
-          <el-form-item label="时长"><el-input-number v-model="anim.duration" :min="100" :step="100" size="small" style="width:100%" controls-position="right" @change="save" /></el-form-item>
-          <el-form-item label="延迟"><el-input-number v-model="anim.delay" :min="0" :step="100" size="small" style="width:100%" controls-position="right" @change="save" /></el-form-item>
+          <el-form-item label="时长(秒)"><el-input-number :model-value="msToSec(anim.duration, 1000)" :min="0.1" :step="0.1" size="small" style="width:100%" controls-position="right" @change="(v: number | undefined) => setAnimDuration(anim, v)" /></el-form-item>
+          <el-form-item label="延迟(秒)"><el-input-number :model-value="msToSec(anim.delay, 0)" :min="0" :step="0.1" size="small" style="width:100%" controls-position="right" @change="(v: number | undefined) => setAnimDelay(anim, v)" /></el-form-item>
           <el-form-item label="方向">
             <el-select v-model="anim.direction" size="small" style="width:100%" @change="save">
               <el-option label="入场" value="in" /><el-option label="出场" value="out" />
@@ -47,6 +47,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useEditorStore } from '@/stores/editor'
+import { msToSec, secToMs } from '@/utils/time'
 import type { Animation } from '@/types'
 
 const editorStore = useEditorStore()
@@ -83,4 +84,14 @@ function removeAnim(idx: number) {
 }
 
 function save() { editorStore.pushHistory() }
+
+function setAnimDuration(anim: Animation, sec: number | undefined) {
+  anim.duration = secToMs(sec, 1000)
+  save()
+}
+
+function setAnimDelay(anim: Animation, sec: number | undefined) {
+  anim.delay = secToMs(sec, 0)
+  save()
+}
 </script>

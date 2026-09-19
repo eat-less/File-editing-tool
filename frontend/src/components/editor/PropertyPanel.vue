@@ -25,6 +25,25 @@
             <el-form-item label="旋转"><el-slider v-model="el.rotation" :min="0" :max="360" @input="update('rotation', el.rotation)" /></el-form-item>
             <el-form-item label="不透明度"><el-slider v-model="el.opacity" :min="0" :max="1" :step="0.01" @input="update('opacity', el.opacity)" /></el-form-item>
             <el-form-item label="圆角"><el-input-number v-model="el.borderRadius" :min="0" :step="1" controls-position="right" style="width:100%" @change="update('borderRadius', el.borderRadius)" /></el-form-item>
+            <template v-if="['image', 'shape'].includes(el.type)">
+              <el-divider content-position="left" style="margin:6px 0">发光</el-divider>
+              <el-form-item>
+                <div style="display:flex;gap:8px;align-items:center;width:100%">
+                  <el-switch v-model="decorGlowOn" @change="update('shadow', decorGlowOn ? { ...el.shadow, color: decorGlowColor, blur: decorGlowBlur, offsetX: 0, offsetY: 0 } : null)" />
+                  <el-color-picker v-model="decorGlowColor" :disabled="!decorGlowOn" @change="update('shadow', { ...el.shadow, color: decorGlowColor, blur: decorGlowBlur, offsetX: 0, offsetY: 0 })" />
+                  <span style="font-size:11px;color:#909399">强度</span>
+                  <el-slider v-model="decorGlowBlur" :min="0" :max="60" :disabled="!decorGlowOn" style="flex:1" @input="update('shadow', { ...el.shadow, color: decorGlowColor, blur: decorGlowBlur, offsetX: 0, offsetY: 0 })" />
+                </div>
+              </el-form-item>
+              <el-divider v-if="el.type === 'image'" content-position="left" style="margin:6px 0">边框</el-divider>
+              <el-form-item v-if="el.type === 'image'">
+                <div style="display:flex;gap:8px;align-items:center;width:100%">
+                  <el-color-picker :model-value="el.stroke?.color || '#ffffff'" @change="(v: string) => update('stroke', { ...el.stroke, color: v })" />
+                  <el-input-number :model-value="el.stroke?.width || 0" :min="0" :max="40" controls-position="right" style="width:90px" @change="(v: number) => update('stroke', { ...el.stroke, width: v || 0 })" />
+                  <span style="font-size:11px;color:#909399">0=关闭</span>
+                </div>
+              </el-form-item>
+            </template>
           </el-form>
         </el-collapse-item>
 
@@ -37,6 +56,13 @@
                 <el-option label="黑体" value="SimHei" /><el-option label="Arial" value="Arial" />
               </el-select>
             </el-form-item>
+            <el-form-item label="尺寸">
+              <div style="display:flex;gap:8px;align-items:center;width:100%">
+                <el-switch :model-value="el.autoFitText !== false" @change="(v: boolean) => { update('autoFitText', v); if (v) fitTextNow() }" />
+                <span style="font-size:11px;color:#909399;flex:1">自动适应文字</span>
+                <el-button size="small" @click="fitTextNow()">适应文字</el-button>
+              </div>
+            </el-form-item>
             <el-form-item label="字号"><el-input-number v-model="el.fontSize" :min="8" :max="200" controls-position="right" style="width:100%" @change="update('fontSize', el.fontSize)" /></el-form-item>
             <el-form-item label="颜色"><el-color-picker v-model="el.color" @change="update('color', el.color)" /></el-form-item>
             <el-form-item label="对齐">
@@ -48,6 +74,21 @@
             </el-form-item>
             <el-form-item label="粗体">
               <el-switch v-model="isBold" @change="onBoldChange" />
+            </el-form-item>
+            <el-divider content-position="left" style="margin:6px 0">描边与阴影</el-divider>
+            <el-form-item label="描边">
+              <div style="display:flex;gap:8px;align-items:center;width:100%">
+                <el-color-picker :model-value="textStrokeCur().color || '#ffffff'" @change="(v: string) => setTextStroke({ color: v })" />
+                <el-input-number :model-value="textStrokeCur().width || 0" :min="0" :max="40" controls-position="right" style="width:90px" @change="(v: number) => setTextStroke({ width: v || 0 })" />
+                <span style="font-size:11px;color:#909399">0=关闭</span>
+              </div>
+            </el-form-item>
+            <el-form-item label="阴影">
+              <div style="display:flex;gap:8px;align-items:center;width:100%">
+                <el-color-picker :model-value="textShadowCur().color || '#000000'" @change="(v: string) => setTextShadow({ color: v })" />
+                <el-slider :model-value="textShadowCur().blur || 0" :min="0" :max="40" style="flex:1" @input="(v: number) => setTextShadow({ blur: v })" />
+                <span style="font-size:11px;color:#909399;flex:none">强度</span>
+              </div>
             </el-form-item>
             <el-form-item label="出现效果">
               <el-select :model-value="el.appearEffect || 'none'" style="width:100%" @change="(v: string) => update('appearEffect', v)">
@@ -87,6 +128,11 @@
                 <div v-if="!imageSrcs.length" style="font-size:12px;color:#909399">从素材库拖入图片添加</div>
               </div>
             </el-form-item>
+            <el-form-item v-if="imageSrcs.length > 1" label="列表切换按钮">
+              <el-button size="small" @click="addMediaBtn('prev')">＋上一张按钮</el-button>
+              <el-button size="small" @click="addMediaBtn('next')">＋下一张按钮</el-button>
+              <span style="font-size:10px;color:#909399">生成纯文字按钮,可拖到任意位置;在“热区”里可改控制目标</span>
+            </el-form-item>
             <el-form-item v-if="imageSrcs.length > 1" label="循环模式">
               <el-select :model-value="el.cycleMode || 'both'" style="width:100%" @change="(v: string) => update('cycleMode', v)">
                 <el-option label="自动+手动" value="both" />
@@ -94,8 +140,12 @@
                 <el-option label="仅手动" value="manual" />
               </el-select>
             </el-form-item>
-            <el-form-item v-if="imageSrcs.length > 1" label="切换间隔(ms)">
-              <el-input-number v-model="el.imageInterval" :min="1000" :step="500" style="width:100%" controls-position="right" @change="update('imageInterval', el.imageInterval)" />
+            <el-form-item v-if="imageSrcs.length > 1 && (el.cycleMode || 'both') === 'both'" label="手动后恢复自动(秒)">
+              <el-input-number :model-value="msToSec(el.manualResumeDelay, 10000)" :min="0" :step="1" controls-position="right" style="width:100%" @change="(v: number | undefined) => update('manualResumeDelay', secToMs(v, 10000))" />
+              <span style="font-size:10px;color:#909399">手动切换后等待此时长再自动播放，0=不再自动</span>
+            </el-form-item>
+            <el-form-item v-if="imageSrcs.length > 1" label="切换间隔(秒)">
+              <el-input-number :model-value="msToSec(el.imageInterval, 3000)" :min="0.5" :step="0.5" style="width:100%" controls-position="right" @change="(v: number | undefined) => update('imageInterval', secToMs(v, 3000))" />
             </el-form-item>
             <el-form-item v-if="imageSrcs.length > 1" label="切换动画">
               <el-select v-model="el.imageTransition" style="width:100%" @change="update('imageTransition', el.imageTransition)">
@@ -215,6 +265,11 @@
                 </div>
               </div>
             </el-form-item>
+            <el-form-item v-if="videoSrcs.length > 1" label="列表切换按钮">
+              <el-button size="small" @click="addMediaBtn('prev')">＋上一张按钮</el-button>
+              <el-button size="small" @click="addMediaBtn('next')">＋下一张按钮</el-button>
+              <span style="font-size:10px;color:#909399">生成纯文字按钮,可拖到任意位置;在“热区”里可改控制目标</span>
+            </el-form-item>
             <el-form-item v-if="videoSrcs.length > 1" label="循环模式">
               <el-select :model-value="el.cycleMode || 'manual'" style="width:100%" @change="(v: string) => update('cycleMode', v)">
                 <el-option label="自动+手动" value="both" />
@@ -222,9 +277,13 @@
                 <el-option label="仅手动" value="manual" />
               </el-select>
             </el-form-item>
-            <el-form-item v-if="videoSrcs.length > 1" label="切换间隔(ms)">
-              <el-input-number :model-value="el.imageInterval || 0" :min="0" :step="500" style="width:100%" controls-position="right" @change="(v: number | undefined) => update('imageInterval', v && v > 0 ? v : undefined)" />
-              <span style="font-size:10px;color:#909399">设为0=播完自动切下一段</span>
+            <el-form-item v-if="videoSrcs.length > 1 && el.cycleMode === 'both'" label="手动后恢复自动(秒)">
+              <el-input-number :model-value="msToSec(el.manualResumeDelay, 10000)" :min="0" :step="1" controls-position="right" style="width:100%" @change="(v: number | undefined) => update('manualResumeDelay', secToMs(v, 10000))" />
+              <span style="font-size:10px;color:#909399">手动切换后等待此时长再自动播放，0=不再自动</span>
+            </el-form-item>
+            <el-form-item v-if="videoSrcs.length > 1" label="切换间隔(秒)">
+              <el-input-number :model-value="msToSec(el.imageInterval, 0)" :min="0" :step="0.5" style="width:100%" controls-position="right" @change="(v: number | undefined) => { const ms = secToMs(v, 0); update('imageInterval', ms > 0 ? ms : undefined) }" />
+              <span style="font-size:10px;color:#909399">0=当前视频播完自动切下一个</span>
             </el-form-item>
             <el-form-item label="循环"><el-switch v-model="el.loop" @change="update('loop', el.loop)" /></el-form-item>
             <el-form-item label="自动播放"><el-switch v-model="el.autoplay" @change="update('autoplay', el.autoplay)" /></el-form-item>
@@ -249,21 +308,139 @@
         <!-- Button properties -->
         <el-collapse-item title="按钮" name="button" v-if="el.type === 'button'">
           <el-form label-position="top" size="small">
+            <el-form-item label="一键样式">
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;width:100%">
+                <div v-for="p in BUTTON_PRESETS" :key="p.id" class="btn-preset" :class="{ active: el.preset === p.id }"
+                     :title="`${p.name}：${p.desc}`" @click="btnApplyPreset(p.id)">
+                  <div class="btn-preset-swatch" :style="buttonPreviewCss(p)"></div>
+                  <div class="btn-preset-name">{{ p.name }}</div>
+                </div>
+              </div>
+            </el-form-item>
+
+            <el-divider content-position="left" style="margin:6px 0">图标</el-divider>
             <el-form-item label="图标">
               <el-select v-model="el.icon" style="width:100%" @change="update('icon', el.icon)">
                 <el-option v-for="ic in BUTTON_ICONS" :key="ic.name" :label="ic.label" :value="ic.name" />
               </el-select>
             </el-form-item>
-            <el-form-item label="图标颜色"><el-color-picker v-model="el.iconColor" @change="update('iconColor', el.iconColor)" /></el-form-item>
-            <el-form-item label="图标尺寸"><el-input-number v-model="el.iconSize" :min="8" :max="500" controls-position="right" style="width:100%" @change="update('iconSize', el.iconSize)" /></el-form-item>
+            <el-row :gutter="8">
+              <el-col :span="14">
+                <el-form-item label="图标颜色"><el-color-picker v-model="el.iconColor" @change="update('iconColor', el.iconColor)" /></el-form-item>
+              </el-col>
+              <el-col :span="10">
+                <el-form-item label="图标尺寸"><el-input-number v-model="el.iconSize" :min="8" :max="500" controls-position="right" style="width:100%" @change="update('iconSize', el.iconSize)" /></el-form-item>
+              </el-col>
+            </el-row>
+
+            <el-divider content-position="left" style="margin:6px 0">文字（可选）</el-divider>
+            <el-form-item label="文字内容">
+              <el-input v-model="btnLabel" clearable placeholder="如：下一页 / 播放" @change="update('label', el.label)" />
+            </el-form-item>
+            <el-row :gutter="8">
+              <el-col :span="14">
+                <el-form-item label="文字颜色"><el-color-picker v-model="el.labelColor" @change="update('labelColor', el.labelColor)" /></el-form-item>
+              </el-col>
+              <el-col :span="10">
+                <el-form-item label="字号"><el-input-number v-model="el.labelSize" :min="8" :max="200" controls-position="right" style="width:100%" @change="update('labelSize', el.labelSize)" /></el-form-item>
+              </el-col>
+            </el-row>
+            <el-form-item label="图标与文字排列">
+              <el-radio-group v-model="el.layout" size="small" @change="update('layout', el.layout)">
+                <el-radio-button value="row">左右</el-radio-button>
+                <el-radio-button value="column">上下</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+
+            <el-divider content-position="left" style="margin:6px 0">外观</el-divider>
             <el-form-item label="背景形状">
               <el-select v-model="el.backgroundShape" style="width:100%" @change="update('backgroundShape', el.backgroundShape)">
-                <el-option label="圆形" value="circle" /><el-option label="圆角矩形" value="roundedRect" />
+                <el-option label="圆形" value="circle" />
+                <el-option label="胶囊" value="pill" />
+                <el-option label="圆角矩形" value="roundedRect" />
+                <el-option label="矩形" value="rect" />
                 <el-option label="无" value="none" />
               </el-select>
             </el-form-item>
-            <el-form-item label="背景色"><el-color-picker v-model="buttonFill" @change="onButtonFillChange" /></el-form-item>
-            <el-form-item label="圆角"><el-input-number v-model="el.cornerRadius" :min="0" :max="500" controls-position="right" style="width:100%" @change="update('cornerRadius', el.cornerRadius)" /></el-form-item>
+            <el-form-item v-if="el.backgroundShape === 'roundedRect'" label="圆角">
+              <el-input-number v-model="el.cornerRadius" :min="0" :max="500" controls-position="right" style="width:100%" @change="update('cornerRadius', el.cornerRadius)" />
+            </el-form-item>
+            <el-form-item v-if="el.backgroundShape !== 'none'" label="填充">
+              <div style="display:flex;flex-direction:column;gap:6px;width:100%">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <el-switch v-model="btnGradOn" active-text="渐变" />
+                </div>
+                <el-color-picker v-if="!btnGradOn" v-model="btnSolidColor" @change="btnSolidColorChange" />
+                <template v-if="btnGradOn">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <el-color-picker v-model="btnGradFrom" />
+                    <span style="color:#909399;font-size:11px">→</span>
+                    <el-color-picker v-model="btnGradTo" />
+                  </div>
+                  <el-slider v-model="btnGradAngle" :min="0" :max="360" />
+                </template>
+              </div>
+            </el-form-item>
+
+            <el-divider content-position="left" style="margin:6px 0">描边与发光</el-divider>
+            <el-row :gutter="8">
+              <el-col :span="14">
+                <el-form-item label="描边色"><el-color-picker v-model="btnBorderColor" @change="btnBorderColorChange" /></el-form-item>
+              </el-col>
+              <el-col :span="10">
+                <el-form-item label="描边宽"><el-input-number v-model="btnBorderWidth" :min="0" :max="40" controls-position="right" style="width:100%" @change="btnBorderWidthChange" /></el-form-item>
+              </el-col>
+            </el-row>
+            <el-form-item label="发光">
+              <div style="display:flex;gap:8px;align-items:center;width:100%">
+                <el-switch v-model="btnGlowOn" @change="btnGlowOnChange" />
+                <el-color-picker v-model="btnGlowColor" :disabled="!btnGlowOn" @change="btnGlowColorChange" />
+                <span style="font-size:11px;color:#909399;flex:none">强度</span>
+                <el-slider v-model="btnGlowBlur" :min="0" :max="80" :disabled="!btnGlowOn" style="flex:1" @input="btnGlowBlurChange" />
+              </div>
+            </el-form-item>
+          </el-form>
+        </el-collapse-item>
+
+        <!-- Decor properties -->
+        <el-collapse-item title="装饰" name="decor" v-if="el.type === 'decor'">
+          <el-form label-position="top" size="small">
+            <el-form-item label="样式">
+              <el-radio-group v-model="decorCat" size="small" style="margin-bottom:6px">
+                <el-radio-button value="frame">画框</el-radio-button>
+                <el-radio-button value="divider">分割</el-radio-button>
+                <el-radio-button value="accent">点缀</el-radio-button>
+              </el-radio-group>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;width:100%">
+                <div v-for="d in decorItems.filter(i => i.category === decorCat)" :key="d.id"
+                     :title="d.name" class="decor-pick" :class="{ active: el.decorId === d.id }"
+                     @click="update('decorId', d.id)">
+                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" v-html="decorPreviewSvg(d.id, '#5b9dff', '#7fb8ff', 2.5)" />
+                </div>
+              </div>
+            </el-form-item>
+            <el-form-item label="填充">
+              <div style="display:flex;gap:8px;align-items:center;width:100%">
+                <el-switch :model-value="decorFillOn" @change="(v: boolean) => update('fill', v ? decorFillColor : 'none')" />
+                <el-color-picker v-model="decorFillColor" :disabled="!decorFillOn" @change="update('fill', decorFillColor)" />
+              </div>
+            </el-form-item>
+            <el-row :gutter="8">
+              <el-col :span="12">
+                <el-form-item label="描边色"><el-color-picker v-model="decorStrokeColor" @change="update('stroke', { ...el.stroke, color: decorStrokeColor })" /></el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="线宽"><el-input-number v-model="decorStrokeWidth" :min="0" :max="40" controls-position="right" style="width:100%" @change="update('stroke', { ...el.stroke, width: decorStrokeWidth })" /></el-form-item>
+              </el-col>
+            </el-row>
+            <el-form-item label="发光">
+              <div style="display:flex;gap:8px;align-items:center;width:100%">
+                <el-switch v-model="decorGlowOn" @change="update('shadow', decorGlowOn ? { ...el.shadow, color: decorGlowColor, blur: decorGlowBlur, offsetX: 0, offsetY: 0 } : null)" />
+                <el-color-picker v-model="decorGlowColor" :disabled="!decorGlowOn" @change="update('shadow', { ...el.shadow, color: decorGlowColor, blur: decorGlowBlur, offsetX: 0, offsetY: 0 })" />
+                <span style="font-size:11px;color:#909399">强度</span>
+                <el-slider v-model="decorGlowBlur" :min="0" :max="60" :disabled="!decorGlowOn" style="flex:1" @input="update('shadow', { ...el.shadow, color: decorGlowColor, blur: decorGlowBlur, offsetX: 0, offsetY: 0 })" />
+              </div>
+            </el-form-item>
           </el-form>
         </el-collapse-item>
 
@@ -445,6 +622,10 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { useEditorStore } from '@/stores/editor'
 import { ElMessageBox } from 'element-plus'
 import { BUTTON_ICONS } from '@/utils/icons'
+import { BUTTON_PRESETS, buttonPreviewCss } from '@/utils/buttonStyles'
+import { isGradient, normalizeFillToStops } from '@/utils/paint'
+import { msToSec, secToMs } from '@/utils/time'
+import { DECOR_SHAPES, decorPreviewSvg } from '@/utils/decorShapes'
 import { APPEAR_EFFECT_OPTIONS as appearEffectOptions, APPEAR_SPEED_OPTIONS as appearSpeedOptions } from '@/utils/appearEffect'
 
 const editorStore = useEditorStore()
@@ -453,7 +634,7 @@ const el = ref<any>({})
 
 const typeSectionMap: Record<string, string> = {
   text: 'text', image: 'image', video: 'video',
-  shape: 'shape', sequenceFrame: 'seq', button: 'button',
+  shape: 'shape', sequenceFrame: 'seq', button: 'button', decor: 'decor',
 }
 
 let ignoreStoreUpdate = false
@@ -505,10 +686,186 @@ const buttonFill = computed({
   set: (v: string) => { el.value.fill = v }
 })
 
+const decorItems = DECOR_SHAPES
+const decorCat = ref('frame')
+const decorFillOn = computed({
+  get: () => !!el.value.fill && el.value.fill !== 'none',
+  set: () => {}
+})
+const decorFillColor = computed({
+  get: () => (typeof el.value.fill === 'string' && el.value.fill !== 'none' ? el.value.fill : '#4C9AFF'),
+  set: (v: string) => { el.value.fill = v }
+})
+const decorStrokeColor = computed({
+  get: () => (el.value.stroke && typeof el.value.stroke === 'object' ? el.value.stroke.color : '#7fb8ff'),
+  set: (v: string) => { el.value.stroke = { ...(el.value.stroke || {}), color: v } }
+})
+const decorStrokeWidth = computed({
+  get: () => (el.value.stroke && typeof el.value.stroke === 'object' && el.value.stroke.width ? el.value.stroke.width : 3),
+  set: (v: number) => { el.value.stroke = { ...(el.value.stroke || {}), width: v } }
+})
+const decorGlowOn = computed({
+  get: () => !!el.value.shadow,
+  set: (v: boolean) => { el.value.shadow = v ? { color: '#7fb8ff', blur: 14, offsetX: 0, offsetY: 0 } : null }
+})
+const decorGlowColor = computed({
+  get: () => (el.value.shadow?.color as string) || '#7fb8ff',
+  set: (v: string) => { el.value.shadow = { ...(el.value.shadow || {}), color: v } }
+})
+const decorGlowBlur = computed({
+  get: () => Number(el.value.shadow?.blur) || 0,
+  set: (v: number) => { el.value.shadow = { ...(el.value.shadow || {}), blur: v } }
+})
+
+// ---------- 按钮样式辅助 ----------
+function btnApplyPreset(id: string) {
+  const p = BUTTON_PRESETS.find(x => x.id === id)
+  if (!p) return
+  const fields: Record<string, any> = JSON.parse(JSON.stringify(p.fields))
+  el.value = { ...el.value, ...fields, preset: id }
+  editorStore.updateElementBatch(el.value.id, { ...fields, preset: id })
+}
+
+const btnLabel = computed({
+  get: () => (typeof el.value.label === 'string' ? el.value.label : ''),
+  set: (v: string) => { el.value.label = v }
+})
+
+const gradNow = () => isGradient(el.value.fill)
+
+function gradCurrent(): any {
+  if (gradNow()) return el.value.fill
+  const c = normalizeFillToStops(el.value.fill, '#409EFF')
+  return { type: 'linearGradient', angle: c.angle || 135, stops: [{ pos: 0, color: c.color1 }, { pos: 1, color: c.color2 }] }
+}
+
+function gradStopsFull(f: any) {
+  const raw = Array.isArray(f?.stops) ? f.stops : []
+  const list = raw.map((x: any) => (typeof x === 'string' ? { pos: 0, color: x } : { pos: Number(x.pos) || 0, color: x.color }))
+  if (!list.length) return [{ pos: 0, color: '#409EFF' }, { pos: 1, color: '#22d3ee' }]
+  if (list[0].pos > 0) list.unshift({ pos: 0, color: list[0].color })
+  const last = list[list.length - 1]
+  if (last.pos < 1) list.push({ pos: 1, color: last.color })
+  return list
+}
+
+function saveGrad(f: any) {
+  const next = JSON.parse(JSON.stringify(f))
+  el.value.fill = next
+  update('fill', next)
+}
+
+function setGradColor(idx: number, color: string) {
+  const f = gradCurrent()
+  const s = gradStopsFull(f)
+  if (idx === 0) s[0].color = color
+  else s[s.length - 1].color = color
+  saveGrad({ ...f, stops: s })
+}
+
+const btnGradOn = computed({
+  get: gradNow,
+  set: (v: boolean) => {
+    if (v) {
+      const f = gradCurrent()
+      saveGrad(f)
+    } else {
+      const c = normalizeFillToStops(el.value.fill, '#409EFF')
+      el.value.fill = c.color1
+      update('fill', c.color1)
+    }
+  }
+})
+
+const btnGradFrom = computed({
+  get: () => gradStopsFull(gradCurrent())[0].color,
+  set: (v: string) => { if (gradNow()) setGradColor(0, v) }
+})
+const btnGradTo = computed({
+  get: () => { const s = gradStopsFull(gradCurrent()); return s[s.length - 1].color },
+  set: (v: string) => { if (gradNow()) setGradColor(1, v) }
+})
+
+const btnGradAngle = computed({
+  get: () => Number(gradCurrent().angle) || 0,
+  set: (v: number) => { if (gradNow()) saveGrad({ ...gradCurrent(), angle: v }) }
+})
+
+const btnSolidColor = computed({
+  get: () => {
+    if (gradNow()) return normalizeFillToStops(el.value.fill, '#409EFF').color1
+    const v = el.value.fill
+    return (typeof v === 'string' && v !== 'none') ? v : '#409EFF'
+  },
+  set: (v: string) => { if (!gradNow()) el.value.fill = v }
+})
+
+const btnStrokeNow = () => ({ ...(el.value.stroke || {}) })
+
+const btnBorderColor = computed({
+  get: () => btnStrokeNow().color || '#409EFF',
+  set: (v: string) => { el.value.stroke = { ...btnStrokeNow(), color: v } }
+})
+const btnBorderWidth = computed({
+  get: () => Number(btnStrokeNow().width) || 0,
+  set: (v: number) => { el.value.stroke = { ...btnStrokeNow(), width: v } }
+})
+
+const btnShadowNow = () => ({ ...(el.value.shadow || {}) })
+
+const btnGlowOn = computed({
+  get: () => !!el.value.shadow,
+  set: (v: boolean) => { el.value.shadow = v ? { color: '#7fd0ff', blur: 16, offsetX: 0, offsetY: 0 } : null }
+})
+const btnGlowColor = computed({
+  get: () => (el.value.shadow?.color as string) || '#7fd0ff',
+  set: (v: string) => { el.value.shadow = { ...btnShadowNow(), color: v } }
+})
+const btnGlowBlur = computed({
+  get: () => Number(el.value.shadow?.blur) || 0,
+  set: (v: number) => { el.value.shadow = { ...btnShadowNow(), blur: v } }
+})
+
+function btnSolidColorChange() { update('fill', el.value.fill) }
+function btnBorderColorChange() { update('stroke', { ...btnStrokeNow() }) }
+function btnBorderWidthChange() { update('stroke', { ...btnStrokeNow() }) }
+function btnGlowOnChange() { if (el.value.shadow) update('shadow', { ...btnShadowNow() }); else update('shadow', null) }
+function btnGlowColorChange() { update('shadow', { ...btnShadowNow() }) }
+function btnGlowBlurChange() { update('shadow', { ...btnShadowNow() }) }
+
+// 文字描边/阴影
+function textStrokeCur() { return { ...(el.value.textStroke || {}) } }
+function textShadowCur() { return { ...(el.value.textShadow || {}) } }
+function setTextStroke(patch: Record<string, any>) {
+  const next = { ...(el.value.textStroke || { color: '#ffffff', width: 0 }), ...patch }
+  el.value.textStroke = next
+  update('textStroke', next)
+}
+function setTextShadow(patch: Record<string, any>) {
+  const next = { ...(el.value.textShadow || { color: '#000000', blur: 0, offsetX: 0, offsetY: 0 }), ...patch, offsetX: 0, offsetY: 0 }
+  el.value.textShadow = next
+  update('textShadow', next)
+}
+
+const TEXT_FIT_KEYS = ['content', 'fontSize', 'fontFamily', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing', 'padding']
+
+function fitTextNow() {
+  if (!el.value.id) return
+  editorStore.fitTextElement(el.value.id)
+  const layer = editorStore.currentPage?.layers.find(l => l.element.id === el.value.id)
+  if (layer) {
+    el.value.width = layer.element.width
+    el.value.height = layer.element.height
+  }
+}
+
 function update(key: string, value: any) {
   ignoreStoreUpdate = true
   el.value[key] = value
   editorStore.updateElement(el.value.id, { [key]: value })
+  if (el.value.type === 'text' && TEXT_FIT_KEYS.includes(key) && el.value.autoFitText !== false) {
+    fitTextNow()
+  }
   nextTick(() => { ignoreStoreUpdate = false })
 }
 
@@ -875,11 +1232,13 @@ function removeVideo(idx: number) {
 }
 
 function setImageAsBg(hash: string) {
-  editorStore.setPageBackgroundByHash('image', hash)
+  if (!el.value.id) return
+  editorStore.setElementAssetAsBackground(el.value.id, hash)
 }
 
 function setVideoAsBg(hash: string) {
-  editorStore.setPageBackgroundByHash('video', hash)
+  if (!el.value.id) return
+  editorStore.setElementAssetAsBackground(el.value.id, hash)
 }
 
 function selectImage(hash: string) {
@@ -892,6 +1251,11 @@ function setAsBackground() {
   if (el.value.id) {
     editorStore.setPageBackground(el.value.id)
   }
+}
+
+function addMediaBtn(direction: 'prev' | 'next') {
+  if (!el.value.id) return
+  editorStore.addMediaControlButton(el.value.id, direction)
 }
 
 function clearBackground() {
@@ -909,4 +1273,13 @@ function deleteElement() {
 <style scoped>
 .property-panel { padding: 8px; }
 .empty-hint { color: #909399; text-align: center; padding: 40px 0; }
+.decor-pick { border: 1px solid #dcdfe6; border-radius: 4px; cursor: pointer; overflow: hidden; background: #f5f7fa; }
+.decor-pick svg { display: block; width: 100%; height: 34px; }
+.decor-pick:hover { border-color: #409EFF; }
+.decor-pick.active { border-color: #409EFF; box-shadow: 0 0 0 1px #409EFF; }
+.btn-preset { border: 1px solid #dcdfe6; border-radius: 6px; cursor: pointer; overflow: hidden; text-align: center; background: #fff; }
+.btn-preset:hover { border-color: #409EFF; }
+.btn-preset.active { border-color: #409EFF; box-shadow: 0 0 0 1px #409EFF; }
+.btn-preset-swatch { height: 38px; margin: 6px 6px 2px; }
+.btn-preset-name { font-size: 10px; color: #606266; padding-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>

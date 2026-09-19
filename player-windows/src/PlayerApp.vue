@@ -8,6 +8,8 @@
       :fill="true"
       :on-cross-device="onCrossDevice"
       :on-state="onState"
+      :on-fullscreen="requestFullscreen"
+      :on-tcp-send="sendTcpCommand"
     />
 
     <div v-if="stage === 'playing' && config" class="player-nav" :class="{ dim: navHidden }" @mouseenter="pokeNav">
@@ -155,6 +157,29 @@ function onCrossDevice(hotspot) {
   socket.sendDeviceAction(msg)
 }
 
+function requestFullscreen() {
+  if (window.playerAPI && window.playerAPI.toggleFullscreen) {
+    window.playerAPI.toggleFullscreen()
+  }
+}
+
+async function sendTcpCommand(cfg) {
+  const t = cfg?.tcp
+  if (!t || !t.host || !t.port) return
+  if (!window.playerAPI || !window.playerAPI.sendTcp) return
+  try {
+    await window.playerAPI.sendTcp({
+      host: t.host,
+      port: Number(t.port),
+      encoding: t.encoding || 'utf8',
+      payload: t.payload || '',
+      tail: t.tail || 'none',
+    })
+  } catch (e) {
+    console.warn('[player] tcp send failed:', e)
+  }
+}
+
 function onState(state) {
   currentIndex.value = state.pageIndex
   pageCount.value = state.pageCount
@@ -213,7 +238,6 @@ async function handleSync() {
     const isActive = state?.activeProgramId === sync.program_id
 
     if (sameVersion && isActive && configRef) {
-      socket?.reportSyncDone(sync.program_id, sync.version)
       ensureAssets(serverUrl.value, sync.assets || []).catch(() => {})
       return
     }

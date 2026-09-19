@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, protocol, net, screen } = require('electron
 const os = require('os')
 const path = require('path')
 const fs = require('fs')
+const nodeNet = require('net')
 const { pathToFileURL } = require('url')
 
 app.disableHardwareAcceleration()
@@ -242,6 +243,42 @@ function registerIpc() {
   ipcMain.handle('window:toggleFullscreen', () => {
     if (!mainWindow) return
     mainWindow.setFullScreen(!mainWindow.isFullScreen())
+  })
+
+  ipcMain.handle('tcp:send', (_e, { host, port, encoding, payload, tail } = {}) => {
+    return new Promise((resolve) => {
+      let done = false
+      const finish = (ok, error) => {
+        if (done) return
+        done = true
+        resolve(ok ? { ok: true } : { ok: false, error })
+      }
+      if (!host || !port) return finish(false, 'missing host/port')
+
+      let buf = Buffer.alloc(0)
+      const text = String(payload || '')
+      if (encoding === 'hex') {
+        const clean = text.replace(/[\s,;]+/g, '')
+        if (clean && clean.length % 2 === 0) buf = Buffer.from(clean, 'hex')
+      } else {
+        buf = Buffer.from(text, 'utf8')
+      }
+      if (tail === 'crlf') buf = Buffer.concat([buf, Buffer.from('\r\n')])
+      else if (tail === 'lf') buf = Buffer.concat([buf, Buffer.from('\n')])
+
+      let sock = null
+      try {
+        sock = nodeNet.connect({ host, port, timeout: 3000 }, () => {
+          try { sock.write(buf) } catch (e) { finish(false, String(e)) }
+          try { sock.end() } catch {}
+        })
+        sock.on('timeout', () => { try { sock.destroy() } catch {} finish(false, 'timeout') })
+        sock.on('error', (e) => finish(false, String((e && e.message) || e)))
+        sock.on('close', () => finish(true))
+      } catch (e) {
+        finish(false, String(e))
+      }
+    })
   })
 }
 

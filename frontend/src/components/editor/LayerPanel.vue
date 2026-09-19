@@ -10,7 +10,7 @@
       :key="layer.element.id"
       class="layer-item"
       :class="{ selected: isSelected(layer.element.id), locked: layer.locked, 'drag-over': dragOverIdx === vidx }"
-      @click="editorStore.selectLayer(layer.element.id, $event.ctrlKey)"
+      @click="onLayerClick(layer.element.id, $event)"
       @dragover.prevent="onDragOver(vidx)"
       @dragleave="onDragLeave"
       @drop="onDrop(vidx, layer)"
@@ -59,6 +59,12 @@ function vizToActual(vidx: number): number {
 }
 
 function isSelected(id: string) { return editorStore.selectedLayerIds.includes(id) }
+
+function onLayerClick(id: string, e: MouseEvent) {
+  const ctrl = e.ctrlKey || e.metaKey
+  const shift = e.shiftKey
+  editorStore.selectLayer(id, ctrl || shift, shift && !ctrl)
+}
 
 function onDragStart(vidx: number, e: DragEvent) {
   dragIdx.value = vidx

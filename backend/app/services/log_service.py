@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.system_log import SystemLog
 
@@ -70,6 +70,29 @@ async def get_logs(db: AsyncSession, log_type: str | None = None, module: str | 
             "created_at": log.created_at.isoformat() if log.created_at else None
         })
     return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+async def delete_logs(db: AsyncSession, before: str | None = None, log_type: str | None = None,
+                      module: str | None = None, delete_all: bool = False) -> int:
+    conditions = []
+    if log_type:
+        conditions.append(SystemLog.log_type == log_type)
+    if module:
+        conditions.append(SystemLog.module == module)
+    if before:
+        try:
+            before_dt = datetime.fromisoformat(before.replace("Z", "+00:00"))
+            conditions.append(SystemLog.created_at < before_dt)
+        except ValueError:
+            pass
+    if not conditions and not delete_all:
+        return 0
+    stmt = delete(SystemLog)
+    if conditions:
+        stmt = stmt.where(and_(*conditions))
+    result = await db.execute(stmt)
+    await db.commit()
+    return result.rowcount or 0
 
 
 async def get_log_statistics(db: AsyncSession) -> dict:

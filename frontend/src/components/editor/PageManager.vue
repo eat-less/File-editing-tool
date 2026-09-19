@@ -18,8 +18,8 @@
       </div>
       <div style="padding:0 8px 8px">
         <el-form size="small" @click.stop>
-          <el-form-item label="时长(ms)" style="margin-bottom:2px">
-            <el-input-number v-model="page.duration" :min="1000" :step="1000" size="small" style="width:100%" controls-position="right" @change="editorStore.pushHistory()" />
+          <el-form-item label="时长(秒)" style="margin-bottom:2px">
+            <el-input-number :model-value="msToSec(page.duration, 10000)" :min="1" :step="1" size="small" style="width:100%" controls-position="right" @change="(v: number | undefined) => { page.duration = secToMs(v, 10000); editorStore.pushHistory() }" />
           </el-form-item>
           <el-form-item label="播放模式" style="margin-bottom:2px">
             <el-select v-model="page.playMode" size="small" style="width:100%" @change="editorStore.pushHistory()">
@@ -42,6 +42,7 @@
             <el-select :model-value="page.background?.type || 'none'" size="small" style="width:100%" @change="(v: string) => updateBg(page, 'type', v)">
               <el-option label="无" value="none" />
               <el-option label="纯色" value="color" />
+              <el-option label="渐变" value="gradient" />
               <el-option label="图片" value="image" />
               <el-option label="视频" value="video" />
             </el-select>
@@ -49,6 +50,18 @@
           <template v-if="page.background?.type === 'color'">
             <el-form-item label="颜色" style="margin-bottom:2px">
               <el-color-picker :model-value="page.background.backgroundColor || '#000'" size="small" @change="(v: string) => updateBg(page, 'backgroundColor', v)" />
+            </el-form-item>
+          </template>
+          <template v-if="page.background?.type === 'gradient'">
+            <el-form-item label="起色" style="margin-bottom:2px">
+              <el-color-picker :model-value="bgGradColor(page, 0)" size="small" @change="(v: string) => setBgGrad(page, 0, v)" />
+            </el-form-item>
+            <el-form-item label="止色" style="margin-bottom:2px">
+              <el-color-picker :model-value="bgGradColor(page, 1)" size="small" @change="(v: string) => setBgGrad(page, 1, v)" />
+            </el-form-item>
+            <el-form-item label="角度" style="margin-bottom:2px">
+              <el-slider :model-value="page.background.gradient?.angle ?? 90" :min="0" :max="360" size="small"
+                         @input="(v: number) => setBgGradAngle(page, v)" />
             </el-form-item>
           </template>
           <template v-if="page.background?.type === 'image' || page.background?.type === 'video'">
@@ -76,6 +89,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useEditorStore } from '@/stores/editor'
+import { msToSec, secToMs } from '@/utils/time'
 import type { PageItem, PageBackground } from '@/types'
 
 const editorStore = useEditorStore()
@@ -85,8 +99,39 @@ function updateBg(page: PageItem, key: string, value: any) {
   const bg: PageBackground = { ...page.background, type: page.background?.type || 'none', [key]: value }
   if (key === 'type' && value !== page.background?.type) {
     bg.assetHash = ''
+    if (value !== 'gradient') bg.gradient = undefined
   }
   page.background = bg
+}
+
+function bgGradColor(page: PageItem, idx: number): string {
+  const stops = page.background?.gradient?.stops
+  if (Array.isArray(stops) && stops[idx]) return stops[idx].color
+  return idx === 0 ? '#0a2b5e' : '#22d3ee'
+}
+
+function bgGradStops(page: PageItem): Array<{ pos: number; color: string }> {
+  const cur = page.background?.gradient
+  const stops = Array.isArray(cur?.stops) && cur!.stops.length
+    ? cur!.stops.map(s => ({ pos: s.pos, color: s.color }))
+    : [{ pos: 0, color: '#0a2b5e' }, { pos: 1, color: '#22d3ee' }]
+  if (stops[0].pos > 0) stops.unshift({ pos: 0, color: stops[0].color })
+  const last = stops[stops.length - 1]
+  if (last.pos < 1) stops.push({ pos: 1, color: last.color })
+  return stops
+}
+
+function setBgGrad(page: PageItem, idx: number, color: string) {
+  const stops = bgGradStops(page)
+  if (idx === 0) stops[0].color = color
+  else stops[stops.length - 1].color = color
+  const angle = page.background?.gradient?.angle ?? 90
+  updateBg(page, 'gradient', { angle, stops })
+}
+
+function setBgGradAngle(page: PageItem, angle: number) {
+  const stops = bgGradStops(page)
+  updateBg(page, 'gradient', { angle, stops })
 }
 </script>
 

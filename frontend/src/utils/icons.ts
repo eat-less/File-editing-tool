@@ -10,6 +10,7 @@ export const BUTTON_ICONS: IconDef[] = [
   { name: 'stop', label: '停止', path: 'M6 6h12v12H6z' },
   { name: 'prev', label: '上一页', path: 'M6 6h2v12H6zm3.5 6l8.5 6V6z' },
   { name: 'next', label: '下一页', path: 'M16 6h2v12h-2zM6 18l8.5-6L6 6z' },
+  { name: 'last', label: '末页', path: 'M13 6l7 6-7 6V6zM5 6l7 6-7 6V6z' },
   { name: 'refresh', label: '刷新', path: 'M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 8 8h-2a6 6 0 1 1-1.76-4.24L13 11h7V4z' },
   { name: 'home', label: '主页', path: 'M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z' },
   { name: 'fullscreen', label: '全屏', path: 'M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z' },

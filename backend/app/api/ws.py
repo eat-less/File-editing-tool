@@ -19,24 +19,28 @@ OFFLINE_THRESHOLD_SECONDS = 75
 SWEEP_INTERVAL_SECONDS = 30
 
 
-async def _sync_device(db, device_code: str, online: bool, ip_address: str | None = None):
+async def _sync_device(db, device_code: str, online: bool, ip_address: str | None = None) -> bool:
+    new_status = "online" if online else "offline"
+    prev_result = await db.execute(select(Device.status).where(Device.unique_code == device_code))
+    prev_status = prev_result.scalar_one_or_none()
     now = datetime.now(timezone.utc)
     values = {
-        "status": "online" if online else "offline",
+        "status": new_status,
         "last_online": now if online else None,
     }
     if ip_address:
         values["ip_address"] = ip_address
     await db.execute(update(Device).where(Device.unique_code == device_code).values(**values))
     await db.commit()
+    return prev_status is not None and prev_status != new_status
 
 
 async def _update_distribution_log(db, device_code: str, program_id: str, version: int | None,
-                                   status: str, error_message: str | None = None):
+                                   status: str, error_message: str | None = None) -> bool:
     dev_result = await db.execute(select(Device).where(Device.unique_code == device_code))
     device = dev_result.scalar_one_or_none()
     if not device:
-        return
+        return False
     q = select(DistributionLog).where(
         DistributionLog.device_id == device.id,
         DistributionLog.program_id == program_id,
@@ -45,7 +49,8 @@ async def _update_distribution_log(db, device_code: str, program_id: str, versio
         q = q.where(DistributionLog.version == version)
     log_row = (await db.execute(q)).scalars().first()
     if not log_row:
-        return
+        return False
+    changed = log_row.status != status
     log_row.status = status
     if status == "synced":
         log_row.completed_at = datetime.now(timezone.utc)
@@ -54,6 +59,7 @@ async def _update_distribution_log(db, device_code: str, program_id: str, versio
     if error_message:
         log_row.error_message = error_message
     await db.commit()
+    return changed
 
 
 async def _resolve_device(db, identifier: str):
@@ -78,12 +84,13 @@ async def device_websocket(websocket: WebSocket, device_identifier: str):
                 if mtype == "device:register":
                     ip = msg.get("ip_address") or device_identifier
                     async with async_session_factory() as db:
-                        await _sync_device(db, device_code, True, ip)
-                        await write_log(
-                            db, "info", "device",
-                            f"设备 {device_name} 上线注册 (IP: {ip or '未知'})",
-                            detail={"device_code": device_code, "device_name": device_name, "ip_address": ip}
-                        )
+                        became_online = await _sync_device(db, device_code, True, ip)
+                        if became_online:
+                            await write_log(
+                                db, "info", "device",
+                                f"设备 {device_name} 上线注册 (IP: {ip or '未知'})",
+                                detail={"device_code": device_code, "device_name": device_name, "ip_address": ip}
+                            )
                     await ws_manager.broadcast_to_controls({
                         "type": "deviceStatus", "deviceCode": device_code, "online": True
                     })
@@ -98,15 +105,16 @@ async def device_websocket(websocket: WebSocket, device_identifier: str):
                         )
                 elif mtype == "device:sync_done":
                     async with async_session_factory() as db:
-                        await _update_distribution_log(
+                        changed = await _update_distribution_log(
                             db, device_code, msg.get("program_id"), msg.get("version"),
                             "synced"
                         )
-                        await write_log(
-                            db, "success", "distribution",
-                            f"设备 {device_code} 同步完成 v{msg.get('version')}",
-                            detail={"program_id": msg.get("program_id"), "version": msg.get("version")}
-                        )
+                        if changed:
+                            await write_log(
+                                db, "success", "distribution",
+                                f"设备 {device_code} 同步完成 v{msg.get('version')}",
+                                detail={"program_id": msg.get("program_id"), "version": msg.get("version")}
+                            )
                 elif mtype == "deviceAction":
                     msg["source"] = msg.get("source", "player")
                     msg["sourceDeviceCode"] = device_code
@@ -139,12 +147,13 @@ async def _on_device_disconnect(device_code: str):
     ws_manager.disconnect_device(device_code)
     try:
         async with async_session_factory() as db:
-            await _sync_device(db, device_code, False)
-            await write_log(
-                db, "warning", "device",
-                f"设备 {device_code} 离线", detail={"device_code": device_code},
-                solution="检查设备网络连接，确认设备已开机并连接到服务器，可尝试重启设备"
-            )
+            went_offline = await _sync_device(db, device_code, False)
+            if went_offline:
+                await write_log(
+                    db, "warning", "device",
+                    f"设备 {device_code} 离线", detail={"device_code": device_code},
+                    solution="检查设备网络连接，确认设备已开机并连接到服务器，可尝试重启设备"
+                )
     except Exception:
         pass
     await ws_manager.broadcast_to_controls({"type": "deviceStatus", "deviceCode": device_code, "online": False})
